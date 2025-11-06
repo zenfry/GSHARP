@@ -91,7 +91,7 @@ Eliminates motor jitter from controller drift by ignoring small joystick movemen
 - Displays "Driver Control" on brain screen
 - All control mappings active
 
-## 🛠️ Code Structure
+## Code Structure
 
 ### Core Functions
 
@@ -115,7 +115,7 @@ Eliminates motor jitter from controller drift by ignoring small joystick movemen
 - Main driver control loop
 - Processes all controller inputs at 50Hz
 
-## 🏁 Getting Started
+## Comp Run
 
 1. Upload program to VEX V5 Brain
 2. Connect controller
@@ -123,7 +123,7 @@ Eliminates motor jitter from controller drift by ignoring small joystick movemen
 4. Program displays "Program Started" and "Ready for Competition" on startup
 5. Competition object automatically manages mode switching
 
-## 📝 Notes
+## Notes
 
 - All motors use 18:1 gear ratio for optimal balance of speed and torque
 - Intake motors are reversed in configuration for correct operational direction
@@ -131,14 +131,5 @@ Eliminates motor jitter from controller drift by ignoring small joystick movemen
 - Edge detection prevents accidental pneumatic triggers
 - Control loop timing ensures consistent, responsive operation
 
-## 🔧 Customization
-
-To modify control mappings or add features:
-1. Unused buttons are clearly marked in code
-2. Adjust `INTAKE_SPEED` constant for different power levels
-3. Modify `DEADBAND` for different sensitivity
-4. Add new functions following existing patterns
-
----
 
 **Competition Ready** | **50Hz Control Loop** | **Edge Detection** | **Arcade Drive**
