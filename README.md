@@ -1,4 +1,66 @@
 # GSHARP
+
+TL;DR
+
+VEX Robot Button Map
+DRIVE CONTROLS
+
+Right Joystick (Axis 2) - Forward/Backward movement
+Right Joystick (Axis 1) - Left/Right turning
+(Arcade drive style - push forward to drive, move left/right to turn)
+
+
+INTAKE CONTROLS
+
+L2 (Left Shoulder Bottom) - Both intakes FORWARD at 100% speed
+
+Primary intake button - use this to pick up game pieces
+
+
+L1 (Left Shoulder Top) - Both intakes REVERSE at 100% speed
+
+Eject or unjam rings/game pieces
+
+
+D-Pad UP - Blue intake only FORWARD at 100% speed
+
+Selective control for blue intake
+
+
+D-Pad DOWN - Blue intake only REVERSE at 100% speed
+
+Reverse blue intake independently
+
+
+PNEUMATIC CONTROLS (Toggle buttons - press once to activate, press again to deactivate)
+
+R1 (Right Shoulder Top) - Toggle Match Load Piston (open/close)
+
+Controls match loading mechanism
+
+
+R2 (Right Shoulder Bottom) - Toggle Medium Goal Piston (open/close)
+
+Controls medium goal clamp/mechanism
+
+
+UNUSED BUTTONS (Available for future features)
+
+D-Pad LEFT
+D-Pad RIGHT
+Button A
+Button B
+Button X
+Button Y
+Left Joystick (all axes)
+
+NOTES:
+
+5% deadband applied to joysticks to prevent drift
+Control loop updates 50 times per second (every 20ms)
+Intake buttons are prioritized: L2 > L1 > UP > DOWN
+Pneumatic toggles use edge detection (won't rapid-fire if held down)
+
 Library Import and Constants
 The program begins by importing the VEX library, which provides all the classes and functions needed to control VEX V5 hardware. Three constants are defined:
 
