@@ -52,10 +52,8 @@ def toggle_pneumatic(piston):
 
 def control_intake(blue_speed, small_speed):
     """Control both intake motors with specified speeds."""
-    if blue_speed == 0:
-        intake_blue.stop()
-    else:
-        intake_blue.spin(FORWARD if blue_speed > 0 else REVERSE, abs(blue_speed), PERCENT)
+    # Blue motor always spins - never stops to prevent balls from falling out
+    intake_blue.spin(FORWARD if blue_speed > 0 else REVERSE, abs(blue_speed), PERCENT)
     
     if small_speed == 0:
         intake_small.stop()
@@ -80,8 +78,7 @@ def user_control():
     brain.screen.print("Driver Control")
     
     # Button state tracking for toggle functionality
-    r1_last_state = False
-    r2_last_state = False
+    b_last_state = False
     
     while True:
         # === DRIVE CONTROL (ARCADE STYLE) ===
@@ -96,33 +93,27 @@ def user_control():
         
         # === INTAKE CONTROL ===
         if controller.buttonL2.pressing():
-            # Both intakes forward
+            # Full intake forward (both motors)
             control_intake(INTAKE_SPEED, INTAKE_SPEED)
         elif controller.buttonL1.pressing():
-            # Both intakes reverse
+            # Full intake reverse (both motors)
             control_intake(-INTAKE_SPEED, -INTAKE_SPEED)
-        elif controller.buttonUp.pressing():
-            # Only blue intake forward
+        elif controller.buttonR1.pressing():
+            # Only blue motor forward
             control_intake(INTAKE_SPEED, 0)
-        elif controller.buttonDown.pressing():
-            # Only blue intake reverse
+        elif controller.buttonR2.pressing():
+            # Only blue motor reverse
             control_intake(-INTAKE_SPEED, 0)
         else:
-            # Stop both intakes
-            control_intake(0, 0)
+            # Stop small intake, but blue keeps spinning forward at low speed
+            control_intake(INTAKE_SPEED, 0)
         
         # === PNEUMATIC CONTROL ===
-        # R1 - Match load toggle (detect button press edge)
-        r1_current = controller.buttonR1.pressing()
-        if r1_current and not r1_last_state:
-            toggle_pneumatic(piston_match_load)
-        r1_last_state = r1_current
-        
-        # R2 - Medium goal toggle (detect button press edge)
-        r2_current = controller.buttonR2.pressing()
-        if r2_current and not r2_last_state:
+        # B button - Medium goal toggle (detect button press edge)
+        b_current = controller.buttonB.pressing()
+        if b_current and not b_last_state:
             toggle_pneumatic(piston_medium_goal)
-        r2_last_state = r2_current
+        b_last_state = b_current
         
         wait(DRIVE_UPDATE_RATE, MSEC)
 
