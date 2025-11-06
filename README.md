@@ -1,193 +1,144 @@
-# GSHARP
+# GSHARP - VEX Robotics Control System
+
+A comprehensive driver control program for VEX V5 robotics competition, featuring arcade-style driving, dual intake system, and pneumatic controls.
+
+## Controller Layout
+
+### Drive Controls
+- **Right Joystick (Vertical)** - Forward/Backward movement
+- **Right Joystick (Horizontal)** - Left/Right turning
+- *Arcade drive style with 5% deadband to prevent drift*
+
+### Intake Controls
+| Button | Function | Description |
+|--------|----------|-------------|
+| **L2** | Both Intakes Forward | Primary intake button - picks up game pieces at 100% speed |
+| **L1** | Both Intakes Reverse | Ejects or unjams rings/game pieces at 100% speed |
+| **D-Pad UP** | Blue Intake Forward | Selective control for blue intake only |
+| **D-Pad DOWN** | Blue Intake Reverse | Reverse blue intake independently |
+
+### Pneumatic Controls
+| Button | Function | Type |
+|--------|----------|------|
+| **R1** | Match Load Piston | Toggle (press to open/close) |
+| **R2** | Medium Goal Piston | Toggle (press to open/close) |
+
+*Note: Pneumatic toggles use edge detection - press once to activate, press again to deactivate. Won't rapid-fire if held.*
+
+### Available Buttons
+The following buttons are currently unused and available for future features:
+- D-Pad LEFT
+- D-Pad RIGHT
+- Buttons A, B, X, Y
+- Left Joystick (all axes)
+
+## Hardware Configuration
 
-TL;DR
+### Drivetrain
+**Six-motor tank drive configuration:**
+- **Left Side:** Ports 14, 15, 16 (18:1 gear ratio)
+- **Right Side:** Ports 11, 12, 13 (18:1 gear ratio)
+- Motor orientation configured for synchronized movement
+
+### Intake System
+- **Blue Intake:** Port 6 (18:1 gear ratio, reversed)
+- **Small Intake:** Port 7 (18:1 gear ratio, reversed)
 
-VEX Robot Button Map
-DRIVE CONTROLS
+### Pneumatics
+- **Match Load Piston:** 3-wire Port A
+- **Medium Goal Piston:** 3-wire Port B
 
-Right Joystick (Axis 2) - Forward/Backward movement
-Right Joystick (Axis 1) - Left/Right turning
-(Arcade drive style - push forward to drive, move left/right to turn)
+## Technical Specifications
 
+- **Control Loop Rate:** 50Hz (updates every 20ms)
+- **Joystick Deadband:** 5% threshold
+- **Intake Speed:** 100% default power
+- **Priority System:** L2 > L1 > D-Pad UP > D-Pad DOWN
 
-INTAKE CONTROLS
+## Features
 
-L2 (Left Shoulder Bottom) - Both intakes FORWARD at 100% speed
+### Arcade Drive System
+Intuitive single-joystick control combining forward/backward movement with turning:
+```
+Left Side Speed = Forward + Turn
+Right Side Speed = Forward - Turn
+```
 
-Primary intake button - use this to pick up game pieces
+### Priority-Based Intake Control
+Prevents conflicting commands when multiple buttons are pressed:
+1. **L2 (Highest)** - Both intakes forward
+2. **L1** - Both intakes reverse
+3. **D-Pad UP** - Blue intake forward only
+4. **D-Pad DOWN** - Blue intake reverse only
 
+### Smart Pneumatic Toggles
+Edge detection ensures clean on/off behavior:
+- One button press = one state change
+- No rapid toggling when held
+- Independent control for each pneumatic
 
-L1 (Left Shoulder Top) - Both intakes REVERSE at 100% speed
+### Deadband Filtering
+Eliminates motor jitter from controller drift by ignoring small joystick movements near center position.
 
-Eject or unjam rings/game pieces
+## Competition Modes
 
+### Autonomous Mode
+- Runs automatically for 15 seconds at match start
+- Displays "Autonomous Mode" on brain screen
 
-D-Pad UP - Blue intake only FORWARD at 100% speed
+### Driver Control Mode
+- Full manual control after autonomous
+- Displays "Driver Control" on brain screen
+- All control mappings active
 
-Selective control for blue intake
+## 🛠️ Code Structure
 
+### Core Functions
 
-D-Pad DOWN - Blue intake only REVERSE at 100% speed
+**`apply_deadband(value)`**
+- Filters joystick input to prevent drift
+- Returns 0 for values within ±5% of center
 
-Reverse blue intake independently
+**`toggle_pneumatic(piston)`**
+- Switches piston state (open ↔ closed)
+- Simple on/off toggle behavior
 
+**`control_intake(blue_speed, small_speed)`**
+- Independent control of both intake motors
+- Supports forward, reverse, and stop for each motor
 
-PNEUMATIC CONTROLS (Toggle buttons - press once to activate, press again to deactivate)
+**`autonomous()`**
+- Handles 15-second autonomous period
+- Placeholder for autonomous routines
 
-R1 (Right Shoulder Top) - Toggle Match Load Piston (open/close)
+**`user_control()`**
+- Main driver control loop
+- Processes all controller inputs at 50Hz
 
-Controls match loading mechanism
+## 🏁 Getting Started
 
+1. Upload program to VEX V5 Brain
+2. Connect controller
+3. Verify all motors and pneumatics are properly connected
+4. Program displays "Program Started" and "Ready for Competition" on startup
+5. Competition object automatically manages mode switching
 
-R2 (Right Shoulder Bottom) - Toggle Medium Goal Piston (open/close)
+## 📝 Notes
 
-Controls medium goal clamp/mechanism
+- All motors use 18:1 gear ratio for optimal balance of speed and torque
+- Intake motors are reversed in configuration for correct operational direction
+- Third motor on each drivetrain side is reversed to match rotation
+- Edge detection prevents accidental pneumatic triggers
+- Control loop timing ensures consistent, responsive operation
 
+## 🔧 Customization
 
-UNUSED BUTTONS (Available for future features)
+To modify control mappings or add features:
+1. Unused buttons are clearly marked in code
+2. Adjust `INTAKE_SPEED` constant for different power levels
+3. Modify `DEADBAND` for different sensitivity
+4. Add new functions following existing patterns
 
-D-Pad LEFT
-D-Pad RIGHT
-Button A
-Button B
-Button X
-Button Y
-Left Joystick (all axes)
+---
 
-NOTES:
-
-5% deadband applied to joysticks to prevent drift
-Control loop updates 50 times per second (every 20ms)
-Intake buttons are prioritized: L2 > L1 > UP > DOWN
-Pneumatic toggles use edge detection (won't rapid-fire if held down)
-
-Library Import and Constants
-The program begins by importing the VEX library, which provides all the classes and functions needed to control VEX V5 hardware. Three constants are defined:
-
-DEADBAND = 5 creates a 5% threshold zone around the joystick's center position to prevent motor jitter from controller drift
-INTAKE_SPEED = 100 sets the default power level (as a percentage) for intake motors
-DRIVE_UPDATE_RATE = 20 determines the control loop runs every 20 milliseconds, resulting in 50 updates per second
-
-Device Configuration - Brain and Controller
-The brain object represents the V5 robot brain, which is the central computer controlling everything. The controller object represents the driver's handheld controller used during matches.
-
-Drivetrain Setup
-The robot uses a six-motor drivetrain configuration with three motors on each side:
-
-Left side motors:
-
-All three motors (ports 14, 15, 16) use 18:1 gear ratio
-Motors A and B are set to False (not reversed), while motor C is set to True (reversed) to ensure all motors spin the same direction relative to the robot
-These are combined into a left_drive motor group 
-
-Right side motors:
-
-Three motors (ports 11, 12, 13) mirror the left side configuration
-Motors A and B are not reversed, motor C is reversed
-Combined into a right_drive motor group
-
-
-Intake System
-Two separate intake motors are configured:
-
-intake_blue on port 6 is reversed and uses an 18:1 gear ratio
-intake_small on port 7 is also reversed with an 18:1 gear ratio
-
-Pneumatic Systems
-Two pneumatic cylinders are connected to the brain's three-wire ports:
-
-piston_match_load on port A 
-piston_medium_goal on port B 
-
-
-Helper Function: apply_deadband
-This function takes a joystick value (ranging from -100 to 100) and applies a deadband filter:
-
-If the absolute value of the input is less than the deadband threshold (5%), it returns 0
-Otherwise, it returns the original value unchanged
-This prevents motors from making tiny unwanted movements when the joystick is nearly centered but not perfectly still
-
-Helper Function: toggle_pneumatic
-This function switches a pneumatic piston's state:
-
-It checks the current state using piston.value() which returns whether the piston is currently open
-If currently open (True), it closes the piston
-If currently closed (False), it opens the piston
-This creates a simple on/off toggle behavior
-
-Helper Function: control_intake
-This function manages both intake motors simultaneously with individual speed control:
-
-Takes two parameters: blue_speed and small_speed (can be positive, negative, or zero)
-For each motor, if speed is 0, it stops the motor completely
-If speed is non-zero, it determines direction (FORWARD for positive, REVERSE for negative) and spins at the absolute value of the speed
-This allows independent control: one intake forward, one backward, both same direction, etc.
-
-Autonomous Function
-This mode runs automatically at the start of every match for exactly 15 seconds:
-
-Clears the brain's screen and displays "Autonomous Mode"
-
-
-User Control Function - Main Control Loop
-This is where the driver takes manual control after autonomous ends.
-Initial Setup:
-
-Clears the screen and displays "Driver Control"
-Creates two variables (r1_last_state and r2_last_state) to track whether R1 and R2 buttons were pressed in the previous loop iteration
-This tracking enables edge detection for toggle functionality
-
-Main Loop (runs continuously):
-Drive Control (Arcade Style)
-
-Reads the right joystick's vertical axis (axis2) for forward/backward movement
-Reads the right joystick's horizontal axis (axis1) for turning
-Both values are filtered through the deadband function
-
-Arcade drive math:
-
-Left side speed = forward + turn (when turning right, left side speeds up)
-Right side speed = forward - turn (when turning right, right side slows down)
-
-
-Both motor groups are commanded to spin with their calculated speeds
-
-Intake Control System
-The code implements a priority-based control scheme:
-Priority 1 (L2 button): If L2 is pressed, both intakes spin forward at full speed
-Priority 2 (L1 button): If L2 isn't pressed but L1 is, both intakes reverse at full speed 
-Priority 3 (Up button): If neither shoulder button is pressed but Up is, only the blue intake spins forward - for selective intake control
-Priority 4 (Down button): If none of the above but Down is pressed, only the blue intake reverses - for selective ejection
-Default: If no intake buttons are pressed, both intakes stop completely
-This priority system prevents conflicting commands (multiple buttons pressed simultaneously).
-
-Pneumatic Control with Edge Detection
-
-R1 Button (Match Load Piston):
-
-Reads the current button state
-Compares it to the previous state stored in r1_last_state
-Only triggers the toggle if the button is currently pressed AND wasn't pressed in the last loop iteration
-Updates r1_last_state for the next iteration
-This edge detection ensures one button press = one toggle, not continuous toggling while held
-
-R2 Button (Medium Goal Piston):
-
-Identical logic to R1 but controls the medium goal piston
-Separate state tracking allows independent operation
-
-Loop Timing
-The loop waits 20 milliseconds at the end of each iteration, creating a consistent 50Hz update rate. 
-Main Program Execution
-Competition Setup:
-
-Creates a Competition object that manages the match flow
-Links the user_control and autonomous functions so they run at the appropriate times
-The competition object automatically handles switching between modes based on field control signals
-
-Startup Display:
-
-Clears the brain screen
-Prints "Program Started" on the first line
-Creates a new line
-Prints "Ready for Competition"
+**Competition Ready** | **50Hz Control Loop** | **Edge Detection** | **Arcade Drive**
