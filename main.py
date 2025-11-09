@@ -3,18 +3,30 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project                                                   #
+# 	Description:  V5 project with PID control                                  #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
 from vex import *
+
 # === CONSTANTS ===
 DEADBAND = 5
 INTAKE_SPEED = 100
 DRIVE_UPDATE_RATE = 20
+
+# PID Constants (tune these values for your robot)
+DRIVE_KP = 0.5      # Proportional gain for driving straight
+DRIVE_KI = 0.0      # Integral gain
+DRIVE_KD = 0.1      # Derivative gain
+
+TURN_KP = 0.6       # Proportional gain for turning
+TURN_KI = 0.0       # Integral gain
+TURN_KD = 0.15      # Derivative gain
+
 # === DEVICE CONFIGURATION ===
 brain = Brain()
 controller = Controller(PRIMARY)
+
 # Drivetrain motors
 left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
 left_motor_b = Motor(Ports.PORT12, GearSetting.RATIO_18_1, True)
@@ -22,15 +34,77 @@ left_motor_c = Motor(Ports.PORT13, GearSetting.RATIO_18_1, False)
 right_motor_a = Motor(Ports.PORT16, GearSetting.RATIO_18_1, True)
 right_motor_b = Motor(Ports.PORT14, GearSetting.RATIO_18_1, True)
 right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
+
 left_drive = MotorGroup(left_motor_a, left_motor_b, left_motor_c)
 right_drive = MotorGroup(right_motor_a, right_motor_b, right_motor_c)
+
 # Intake motors
 intake_blue = Motor(Ports.PORT6, GearSetting.RATIO_18_1, False)
 intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
+
+# Inertial sensor for PID (Add the port below)
+# inertial = Inertial(Ports.PORT1)
+
+# === PID CONTROLLER CLASS ===
+class PIDController:
+    """PID Controller for precise robot movements."""
+    
+    def __init__(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0
+        self.previous_error = 0
+        self.output_limit = 100  # Max motor speed percentage
+        
+    def calculate(self, setpoint, current_value, dt=0.02):
+        """
+        Calculate PID output.
+        
+        Args:
+            setpoint: Target value
+            current_value: Current measured value
+            dt: Time delta in seconds (default 20ms = 0.02s)
+        
+        Returns:
+            PID output value
+        """
+        # Calculate error
+        error = setpoint - current_value
+        
+        # Proportional term
+        p_term = self.kp * error
+        
+        # Integral term (with anti-windup)
+        self.integral += error * dt
+        # Limit integral to prevent windup
+        self.integral = max(-50, min(50, self.integral))
+        i_term = self.ki * self.integral
+        
+        # Derivative term
+        d_term = self.kd * (error - self.previous_error) / dt
+        
+        # Calculate total output
+        output = p_term + i_term + d_term
+        
+        # Limit output
+        output = max(-self.output_limit, min(self.output_limit, output))
+        
+        # Store error for next iteration
+        self.previous_error = error
+        
+        return output
+    
+    def reset(self):
+        """Reset PID controller state."""
+        self.integral = 0
+        self.previous_error = 0
+
 # === HELPER FUNCTIONS ===
 def apply_deadband(value, deadband=DEADBAND):
     """Apply deadband to joystick input to reduce drift."""
     return 0 if abs(value) < deadband else value
+
 def control_intake(blue_speed, small_speed):
     """Control both intake motors with specified speeds."""
     if blue_speed == 0:
@@ -42,16 +116,116 @@ def control_intake(blue_speed, small_speed):
         intake_small.stop()
     else:
         intake_small.spin(FORWARD if small_speed > 0 else REVERSE, abs(small_speed), PERCENT)
+
+# === PID MOVEMENT FUNCTIONS ===
+def drive_straight_pid(distance_degrees, speed=50):
+    """
+    Drive straight using PID to maintain equal motor positions.
+    
+    Args:
+        distance_degrees: Distance to travel in motor degrees (positive = forward, negative = backward)
+        speed: Base forward speed (0-100)
+    """
+    # Create PID controller for maintaining straight line
+    pid = PIDController(DRIVE_KP, DRIVE_KI, DRIVE_KD)
+    
+    # Reset motor encoders
+    left_drive.set_position(0, DEGREES)
+    right_drive.set_position(0, DEGREES)
+    
+    # Determine direction and target
+    direction = FORWARD if distance_degrees > 0 else REVERSE
+    target_position = abs(distance_degrees)
+    tolerance = 10  # degrees
+    
+    while True:
+        # Get current positions (absolute values)
+        left_pos = abs(left_drive.position(DEGREES))
+        right_pos = abs(right_drive.position(DEGREES))
+        
+        # Average position
+        avg_pos = (left_pos + right_pos) / 2
+        
+        # Check if target reached
+        if avg_pos >= target_position - tolerance:
+            break
+        
+        # Calculate correction to keep robot straight
+        position_diff = right_pos - left_pos
+        correction = pid.calculate(0, position_diff)
+        
+        # Apply speeds with correction
+        left_speed = speed - correction
+        right_speed = speed + correction
+        
+        # Clamp speeds to valid range
+        left_speed = max(-100, min(100, left_speed))
+        right_speed = max(-100, min(100, right_speed))
+        
+        left_drive.spin(direction, abs(left_speed), PERCENT)
+        right_drive.spin(direction, abs(right_speed), PERCENT)
+        
+        wait(DRIVE_UPDATE_RATE, MSEC)
+    
+    # Stop motors
+    left_drive.stop()
+    right_drive.stop()
+
+def turn_pid(target_degrees):
+    """
+    Turn to a specific angle using PID (requires inertial sensor).
+    
+    Args:
+        target_degrees: Target angle in degrees (positive = right, negative = left)
+    """
+    # NOTE: Uncomment this function when using the intertial sensor
+    '''
+    pid = PIDController(TURN_KP, TURN_KI, TURN_KD)
+    
+    inertial.set_heading(0, DEGREES)
+    tolerance = 2  # degrees
+    
+    while True:
+        current_heading = inertial.heading(DEGREES)
+        
+        # Normalize angle to -180 to 180
+        if current_heading > 180:
+            current_heading -= 360
+        
+        if abs(current_heading - target_degrees) < tolerance:
+            break
+        
+        # Calculate turn power
+        turn_power = pid.calculate(target_degrees, current_heading)
+        
+        # Apply opposite speeds to turn
+        left_drive.spin(FORWARD, turn_power, PERCENT)
+        right_drive.spin(FORWARD, -turn_power, PERCENT)
+        
+        wait(DRIVE_UPDATE_RATE, MSEC)
+    
+    left_drive.stop()
+    right_drive.stop()
+    '''
+    pass
+
 # === AUTONOMOUS ===
 def autonomous():
     """Autonomous mode - runs for 15 seconds at match start."""
     brain.screen.clear_screen()
     brain.screen.print("Autonomous Mode")
     
-    # Add your autonomous code here
-    # Example:
-    # left_drive.spin_for(FORWARD, 500, DEGREES)
-    # right_drive.spin_for(FORWARD, 500, DEGREES)
+    # Example autonomous routine using PID
+    # Drive forward 1000 degrees
+    drive_straight_pid(1000, speed=50)
+    wait(500, MSEC)
+    
+    # Drive backward
+    drive_straight_pid(-1000, speed=50)
+    
+    # Turn (requires inertial sensor)
+    # turn_pid(90)  # Turn 90 degrees right
+
 # === DRIVER CONTROL ===
 def user_control():
     """Driver control mode - runs after autonomous."""
@@ -60,40 +234,38 @@ def user_control():
     
     while True:
         # === DRIVE CONTROL (ARCADE STYLE) ===
-        # Left stick (axis3) controls forward/backward
-        # Right stick (axis1) controls turning
         forward = apply_deadband(controller.axis3.position())
-        turn = apply_deadband(controller.axis2.position())
+        turn = apply_deadband(controller.axis1.position())
         
-        left_speed = forward - turn
-        right_speed = forward + turn
+        # Standard arcade drive
+        left_speed = forward + turn
+        right_speed = forward - turn
         
         left_drive.spin(FORWARD, left_speed, PERCENT)
         right_drive.spin(FORWARD, right_speed, PERCENT)
         
         # === INTAKE CONTROL ===
         if controller.buttonL2.pressing():
-            # Both intakes forward
             control_intake(INTAKE_SPEED, INTAKE_SPEED)
         elif controller.buttonL1.pressing():
-            # Both intakes reverse
             control_intake(-INTAKE_SPEED, -INTAKE_SPEED)
         elif controller.buttonR2.pressing():
-            # Only blue intake forward
             control_intake(INTAKE_SPEED, 0)
         elif controller.buttonR1.pressing():
-            # Only blue intake reverse
             control_intake(-INTAKE_SPEED, 0)
         else:
-            # Stop both intakes
             control_intake(0, 0)
         
         wait(DRIVE_UPDATE_RATE, MSEC)
+
 # === MAIN PROGRAM ===
 # Create competition instance
 comp = Competition(user_control, autonomous)
+
 # Display startup message
 brain.screen.clear_screen()
 brain.screen.print("Program Started")
 brain.screen.new_line()
 brain.screen.print("Ready for Competition")
+brain.screen.new_line()
+brain.screen.print("PID Enabled")
