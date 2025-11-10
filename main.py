@@ -3,7 +3,7 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project with PID control                                  #
+# 	Description:  V5 project with PID control and custom brake settings       #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -13,6 +13,11 @@ from vex import *
 DEADBAND = 5
 INTAKE_SPEED = 100
 DRIVE_UPDATE_RATE = 20
+
+# Brake Settings
+DRIVE_BRAKE_STRENGTH_STRONG = 0.7  # Stronger brake option (0.0 = coast, 1.0 = full brake)
+DRIVE_BRAKE_STRENGTH_WEAK = 0.4    # Weaker brake option for testing
+ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG  # Driver prefers stronger
 
 # PID Constants (tune these values for your robot)
 DRIVE_KP = 0.5      # Proportional gain for driving straight
@@ -43,12 +48,21 @@ right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
 left_drive = MotorGroup(left_motor_a, left_motor_b, left_motor_c)
 right_drive = MotorGroup(right_motor_a, right_motor_b, right_motor_c)
 
+# Configure brake modes
+# Turn motors: BRAKE mode for precise control
+left_drive.set_stopping(BRAKE)
+right_drive.set_stopping(BRAKE)
+
 # Intake motors
 intake_blue = Motor(Ports.PORT6, GearSetting.RATIO_18_1, False)
 intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
 
 # Inertial sensor for PID (Add the port below)
 # inertial = Inertial(Ports.PORT1)
+
+# === CUSTOM BRAKE VARIABLES ===
+previous_left_speed = 0
+previous_right_speed = 0
 
 # === PID CONTROLLER CLASS ===
 class PIDController:
@@ -109,6 +123,33 @@ class PIDController:
 def apply_deadband(value, deadband=DEADBAND):
     """Apply deadband to joystick input to reduce drift."""
     return 0 if abs(value) < deadband else value
+
+def apply_custom_brake(current_speed, previous_speed, brake_strength):
+    """
+    Apply custom brake between BRAKE and COAST modes.
+    
+    Args:
+        current_speed: Commanded speed from driver (0 = wants to stop)
+        previous_speed: Speed from previous loop iteration
+        brake_strength: 0.0 = coast, 1.0 = full brake, values between = custom
+    
+    Returns:
+        Adjusted speed with braking applied
+    """
+    # If driver is commanding movement, return that speed
+    if abs(current_speed) > DEADBAND:
+        return current_speed
+    
+    # Driver wants to stop - apply proportional braking
+    # Reduce speed based on brake strength
+    brake_factor = 1.0 - brake_strength
+    new_speed = previous_speed * brake_factor
+    
+    # Stop completely when speed gets very low
+    if abs(new_speed) < 2:
+        return 0
+    
+    return new_speed
 
 def control_intake(blue_speed, small_speed):
     """Control both intake motors with specified speeds."""
@@ -234,20 +275,51 @@ def autonomous():
 # === DRIVER CONTROL ===
 def user_control():
     """Driver control mode - runs after autonomous."""
+    global previous_left_speed, previous_right_speed
+    
     brain.screen.clear_screen()
     brain.screen.print("Driver Control")
+    brain.screen.new_line()
+    brain.screen.print("Brake: " + str(ACTIVE_DRIVE_BRAKE))
     
     while True:
-        # === DRIVE CONTROL (ARCADE STYLE) ===
+        # === DRIVE CONTROL (ARCADE STYLE WITH CUSTOM BRAKE) ===
         forward = apply_deadband(controller.axis3.position())
         turn = apply_deadband(controller.axis1.position())
         
-        # Standard arcade drive
-        left_speed = forward + turn
-        right_speed = forward - turn
+        # Calculate desired speeds (arcade drive)
+        desired_left_speed = forward + turn
+        desired_right_speed = forward - turn
         
-        left_drive.spin(FORWARD, left_speed, PERCENT)
-        right_drive.spin(FORWARD, right_speed, PERCENT)
+        # Apply custom brake when driver releases sticks (for drive only, not turns)
+        # Only apply custom brake to forward/backward motion
+        if abs(forward) < DEADBAND and abs(turn) >= DEADBAND:
+            # Driver is turning only - use standard BRAKE mode (already set)
+            left_speed = desired_left_speed
+            right_speed = desired_right_speed
+        elif abs(forward) < DEADBAND and abs(turn) < DEADBAND:
+            # Driver released both sticks - apply custom brake to forward motion
+            left_speed = apply_custom_brake(desired_left_speed, previous_left_speed, ACTIVE_DRIVE_BRAKE)
+            right_speed = apply_custom_brake(desired_right_speed, previous_right_speed, ACTIVE_DRIVE_BRAKE)
+        else:
+            # Driver is actively driving - use commanded speeds
+            left_speed = desired_left_speed
+            right_speed = desired_right_speed
+        
+        # Send speeds to motors
+        if abs(left_speed) < 1:
+            left_drive.stop(BRAKE)  # Use BRAKE for turns
+        else:
+            left_drive.spin(FORWARD, left_speed, PERCENT)
+        
+        if abs(right_speed) < 1:
+            right_drive.stop(BRAKE)  # Use BRAKE for turns
+        else:
+            right_drive.spin(FORWARD, right_speed, PERCENT)
+        
+        # Store speeds for next iteration
+        previous_left_speed = left_speed
+        previous_right_speed = right_speed
         
         # === INTAKE CONTROL ===
         if controller.buttonL2.pressing():
@@ -293,3 +365,5 @@ brain.screen.new_line()
 brain.screen.print("Ready for Competition")
 brain.screen.new_line()
 brain.screen.print("PID Enabled")
+brain.screen.new_line()
+brain.screen.print("Custom Brake: " + str(ACTIVE_DRIVE_BRAKE))
