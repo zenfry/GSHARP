@@ -27,11 +27,16 @@ TURN_KD = 0.15      # Derivative gain
 brain = Brain()
 controller = Controller(PRIMARY)
 
+# Pistons
+MG_piston = adi.DigitalOut('G') #Button A, medium goal
+DS_piston = adi.DigitalOut('E') #Button X, de-score
+ML_piston = adi.DigitalOut('H') #Button B, match load
+
 # Drivetrain motors
 left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
 left_motor_b = Motor(Ports.PORT12, GearSetting.RATIO_18_1, True)
 left_motor_c = Motor(Ports.PORT13, GearSetting.RATIO_18_1, False)
-right_motor_a = Motor(Ports.PORT16, GearSetting.RATIO_18_1, True)
+right_motor_a = Motor(Ports.PORT15, GearSetting.RATIO_18_1, True)
 right_motor_b = Motor(Ports.PORT14, GearSetting.RATIO_18_1, True)
 right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
 
@@ -255,6 +260,25 @@ def user_control():
             control_intake(-INTAKE_SPEED, 0)
         else:
             control_intake(0, 0)
+        
+        # === PISTON CONTROL ===
+        # Medium Goal Piston - Button A
+        if controller.buttonA.pressing():
+            MG_piston.set(True)
+        else:
+            MG_piston.set(False)
+        
+        # De-score Piston - Button X
+        if controller.buttonX.pressing():
+            DS_piston.set(True)
+        else:
+            DS_piston.set(False)
+        
+        # Match Load Piston - Button B
+        if controller.buttonB.pressing():
+            ML_piston.set(True)
+        else:
+            ML_piston.set(False)
         
         wait(DRIVE_UPDATE_RATE, MSEC)
 
