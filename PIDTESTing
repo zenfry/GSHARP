@@ -1,0 +1,487 @@
+# ---------------------------------------------------------------------------- #
+#                                                                              #
+# 	Module:       pid_testing.py                                               #
+# 	Author:       jordanawilkes                                                #
+# 	Description:  PID Testing and Tuning Program                               #
+#                 Run this to test and tune your PID values                    #
+#                                                                              #
+# ---------------------------------------------------------------------------- #
+from vex import *
+
+# === DEVICE CONFIGURATION ===
+brain = Brain()
+controller = Controller(PRIMARY)
+
+# Drivetrain motors (same as your main program)
+left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
+left_motor_b = Motor(Ports.PORT12, GearSetting.RATIO_18_1, True)
+left_motor_c = Motor(Ports.PORT13, GearSetting.RATIO_18_1, False)
+right_motor_a = Motor(Ports.PORT15, GearSetting.RATIO_18_1, True)
+right_motor_b = Motor(Ports.PORT14, GearSetting.RATIO_18_1, True)
+right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
+
+left_drive = MotorGroup(left_motor_a, left_motor_b, left_motor_c)
+right_drive = MotorGroup(right_motor_a, right_motor_b, right_motor_c)
+
+# Inertial sensor
+inertial = Inertial(Ports.PORT1)
+
+# === PID TUNING VALUES ===
+# Start with these conservative values
+test_turn_kp = 0.4
+test_turn_ki = 0.0
+test_turn_kd = 0.1
+
+test_drive_kp = 0.3
+test_drive_ki = 0.0
+test_drive_kd = 0.05
+
+# === PID CONTROLLER CLASS ===
+class PIDController:
+    def __init__(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0
+        self.previous_error = 0
+        self.output_limit = 100
+        
+    def calculate(self, setpoint, current_value, dt=0.02):
+        error = setpoint - current_value
+        
+        p_term = self.kp * error
+        
+        self.integral += error * dt
+        max_integral = 50 / max(self.ki, 0.01)
+        self.integral = max(-max_integral, min(max_integral, self.integral))
+        i_term = self.ki * self.integral
+        
+        d_term = self.kd * (error - self.previous_error) / dt
+        
+        output = p_term + i_term + d_term
+        output = max(-self.output_limit, min(self.output_limit, output))
+        
+        self.previous_error = error
+        
+        return output
+    
+    def reset(self):
+        self.integral = 0
+        self.previous_error = 0
+
+# === TEST FUNCTIONS ===
+
+def test_turn_90():
+    """Test: Turn 90 degrees to the right"""
+    brain.screen.clear_screen()
+    brain.screen.print("TEST: Turn 90 degrees")
+    brain.screen.new_line()
+    brain.screen.print("Place robot in open space")
+    brain.screen.new_line()
+    brain.screen.print("Press A to start...")
+    
+    while not controller.buttonA.pressing():
+        wait(20, MSEC)
+    
+    wait(500, MSEC)  # Debounce
+    
+    # Reset heading
+    inertial.set_heading(0, DEGREES)
+    wait(50, MSEC)
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Turning...")
+    
+    pid = PIDController(test_turn_kp, test_turn_ki, test_turn_kd)
+    target = 90
+    start_time = brain.timer.time(MSEC)
+    
+    # Data collection
+    max_overshoot = 0
+    settled = False
+    settle_time = 0
+    
+    while brain.timer.time(MSEC) - start_time < 5000:
+        current = inertial.heading(DEGREES)
+        
+        # Calculate error
+        error = target - current
+        if error > 180:
+            error -= 360
+        elif error < -180:
+            error += 360
+        
+        # Check if settled (within 2 degrees for 200ms)
+        if abs(error) < 2:
+            if not settled:
+                settled = True
+                settle_time = brain.timer.time(MSEC) - start_time
+        
+        # Track overshoot
+        if current > target and (current - target) > max_overshoot:
+            max_overshoot = current - target
+        
+        # Calculate turn power
+        turn_power = pid.calculate(target, current)
+        
+        # Apply power
+        left_drive.spin(FORWARD, turn_power, PERCENT)
+        right_drive.spin(FORWARD, -turn_power, PERCENT)
+        
+        # Display current heading
+        brain.screen.clear_screen()
+        brain.screen.print("Target: " + str(target))
+        brain.screen.new_line()
+        brain.screen.print("Current: " + str(round(current, 1)))
+        brain.screen.new_line()
+        brain.screen.print("Error: " + str(round(error, 1)))
+        brain.screen.new_line()
+        brain.screen.print("Power: " + str(round(turn_power, 1)))
+        
+        # Stop if settled for 200ms
+        if settled and brain.timer.time(MSEC) - start_time > settle_time + 200:
+            break
+        
+        wait(20, MSEC)
+    
+    # Stop
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
+    
+    final_heading = inertial.heading(DEGREES)
+    final_error = abs(target - final_heading)
+    
+    # Display results
+    brain.screen.clear_screen()
+    brain.screen.print("=== RESULTS ===")
+    brain.screen.new_line()
+    brain.screen.print("Target: " + str(target))
+    brain.screen.new_line()
+    brain.screen.print("Final: " + str(round(final_heading, 1)))
+    brain.screen.new_line()
+    brain.screen.print("Error: " + str(round(final_error, 1)) + " deg")
+    brain.screen.new_line()
+    brain.screen.print("Overshoot: " + str(round(max_overshoot, 1)))
+    brain.screen.new_line()
+    if settled:
+        brain.screen.print("Settle: " + str(settle_time) + " ms")
+    else:
+        brain.screen.print("Did not settle!")
+    
+    wait(5000, MSEC)
+
+def test_turn_180():
+    """Test: Turn 180 degrees"""
+    brain.screen.clear_screen()
+    brain.screen.print("TEST: Turn 180 degrees")
+    brain.screen.new_line()
+    brain.screen.print("Press A to start...")
+    
+    while not controller.buttonA.pressing():
+        wait(20, MSEC)
+    
+    wait(500, MSEC)
+    
+    inertial.set_heading(0, DEGREES)
+    wait(50, MSEC)
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Turning 180...")
+    
+    pid = PIDController(test_turn_kp, test_turn_ki, test_turn_kd)
+    target = 180
+    start_time = brain.timer.time(MSEC)
+    
+    while brain.timer.time(MSEC) - start_time < 5000:
+        current = inertial.heading(DEGREES)
+        
+        error = target - current
+        if error > 180:
+            error -= 360
+        elif error < -180:
+            error += 360
+        
+        if abs(error) < 2:
+            break
+        
+        turn_power = pid.calculate(target, current)
+        
+        left_drive.spin(FORWARD, turn_power, PERCENT)
+        right_drive.spin(FORWARD, -turn_power, PERCENT)
+        
+        brain.screen.clear_screen()
+        brain.screen.print("Current: " + str(round(current, 1)))
+        brain.screen.new_line()
+        brain.screen.print("Error: " + str(round(error, 1)))
+        
+        wait(20, MSEC)
+    
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
+    
+    final_heading = inertial.heading(DEGREES)
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Final: " + str(round(final_heading, 1)))
+    brain.screen.new_line()
+    brain.screen.print("Target was: 180")
+    
+    wait(5000, MSEC)
+
+def test_drive_straight():
+    """Test: Drive straight 3 feet"""
+    brain.screen.clear_screen()
+    brain.screen.print("TEST: Drive Straight")
+    brain.screen.new_line()
+    brain.screen.print("36 inches forward")
+    brain.screen.new_line()
+    brain.screen.print("Press A to start...")
+    
+    while not controller.buttonA.pressing():
+        wait(20, MSEC)
+    
+    wait(500, MSEC)
+    
+    # Set brake mode for autonomous
+    left_drive.set_stopping(BRAKE)
+    right_drive.set_stopping(BRAKE)
+    
+    # Reset encoders
+    left_drive.set_position(0, DEGREES)
+    right_drive.set_position(0, DEGREES)
+    inertial.set_heading(0, DEGREES)
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Driving...")
+    
+    # Calculate target (36 inches)
+    WHEEL_DIAMETER = 3.25
+    GEAR_RATIO = 1.67
+    distance = 36  # inches
+    wheel_circumference = WHEEL_DIAMETER * 3.14159
+    wheel_rotations = distance / wheel_circumference
+    target_degrees = wheel_rotations * 360 * GEAR_RATIO
+    
+    pid = PIDController(test_drive_kp, test_drive_ki, test_drive_kd)
+    speed = 50
+    start_time = brain.timer.time(MSEC)
+    
+    max_heading_error = 0
+    
+    while brain.timer.time(MSEC) - start_time < 5000:
+        left_pos = abs(left_drive.position(DEGREES))
+        right_pos = abs(right_drive.position(DEGREES))
+        avg_pos = (left_pos + right_pos) / 2
+        
+        if avg_pos >= target_degrees - 15:
+            break
+        
+        # Track straightness
+        heading = inertial.heading(DEGREES)
+        heading_error = heading if heading <= 180 else heading - 360
+        if abs(heading_error) > abs(max_heading_error):
+            max_heading_error = heading_error
+        
+        # Correction for driving straight
+        position_diff = right_pos - left_pos
+        correction = pid.calculate(0, position_diff)
+        
+        left_speed = speed - correction
+        right_speed = speed + correction
+        
+        left_speed = max(10, min(100, abs(left_speed)))
+        right_speed = max(10, min(100, abs(right_speed)))
+        
+        left_drive.spin(FORWARD, left_speed, PERCENT)
+        right_drive.spin(FORWARD, right_speed, PERCENT)
+        
+        brain.screen.clear_screen()
+        brain.screen.print("Pos: " + str(round(avg_pos, 0)))
+        brain.screen.new_line()
+        brain.screen.print("Target: " + str(round(target_degrees, 0)))
+        brain.screen.new_line()
+        brain.screen.print("Heading: " + str(round(heading_error, 1)))
+        
+        wait(20, MSEC)
+    
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
+    
+    final_heading = inertial.heading(DEGREES)
+    final_heading_error = final_heading if final_heading <= 180 else final_heading - 360
+    
+    brain.screen.clear_screen()
+    brain.screen.print("=== RESULTS ===")
+    brain.screen.new_line()
+    brain.screen.print("Distance: 36 inches")
+    brain.screen.new_line()
+    brain.screen.print("Final heading: " + str(round(final_heading_error, 1)))
+    brain.screen.new_line()
+    brain.screen.print("Max drift: " + str(round(max_heading_error, 1)))
+    brain.screen.new_line()
+    brain.screen.print("GOOD if < 5 degrees")
+    
+    wait(5000, MSEC)
+
+def test_square_pattern():
+    """Test: Drive in a square pattern"""
+    brain.screen.clear_screen()
+    brain.screen.print("TEST: Square Pattern")
+    brain.screen.new_line()
+    brain.screen.print("4 sides, 90 deg turns")
+    brain.screen.new_line()
+    brain.screen.print("Press A to start...")
+    
+    while not controller.buttonA.pressing():
+        wait(20, MSEC)
+    
+    wait(500, MSEC)
+    
+    left_drive.set_stopping(BRAKE)
+    right_drive.set_stopping(BRAKE)
+    
+    # Calibrate
+    inertial.set_heading(0, DEGREES)
+    wait(50, MSEC)
+    
+    for side in range(4):
+        brain.screen.clear_screen()
+        brain.screen.print("Side " + str(side + 1) + " of 4")
+        
+        # Drive forward 24 inches
+        left_drive.set_position(0, DEGREES)
+        right_drive.set_position(0, DEGREES)
+        
+        WHEEL_DIAMETER = 3.25
+        GEAR_RATIO = 1.67
+        distance = 24
+        wheel_circumference = WHEEL_DIAMETER * 3.14159
+        target_degrees = (distance / wheel_circumference) * 360 * GEAR_RATIO
+        
+        pid_drive = PIDController(test_drive_kp, test_drive_ki, test_drive_kd)
+        
+        while True:
+            left_pos = abs(left_drive.position(DEGREES))
+            right_pos = abs(right_drive.position(DEGREES))
+            avg_pos = (left_pos + right_pos) / 2
+            
+            if avg_pos >= target_degrees - 15:
+                break
+            
+            position_diff = right_pos - left_pos
+            correction = pid_drive.calculate(0, position_diff)
+            
+            left_speed = 50 - correction
+            right_speed = 50 + correction
+            
+            left_drive.spin(FORWARD, left_speed, PERCENT)
+            right_drive.spin(FORWARD, right_speed, PERCENT)
+            
+            wait(20, MSEC)
+        
+        left_drive.stop(BRAKE)
+        right_drive.stop(BRAKE)
+        wait(300, MSEC)
+        
+        # Turn 90 degrees
+        brain.screen.new_line()
+        brain.screen.print("Turning...")
+        
+        target_heading = ((side + 1) * 90) % 360
+        pid_turn = PIDController(test_turn_kp, test_turn_ki, test_turn_kd)
+        
+        timeout = brain.timer.time(MSEC) + 3000
+        while brain.timer.time(MSEC) < timeout:
+            current_heading = inertial.heading(DEGREES)
+            
+            error = target_heading - current_heading
+            if error > 180:
+                error -= 360
+            elif error < -180:
+                error += 360
+            
+            if abs(error) < 2:
+                break
+            
+            turn_power = pid_turn.calculate(target_heading, current_heading)
+            
+            left_drive.spin(FORWARD, turn_power, PERCENT)
+            right_drive.spin(FORWARD, -turn_power, PERCENT)
+            
+            wait(20, MSEC)
+        
+        left_drive.stop(BRAKE)
+        right_drive.stop(BRAKE)
+        wait(500, MSEC)
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Square complete!")
+    brain.screen.new_line()
+    brain.screen.print("Final heading: " + str(round(inertial.heading(DEGREES), 1)))
+    brain.screen.new_line()
+    brain.screen.print("Should be near 0")
+    
+    wait(5000, MSEC)
+
+# === MENU SYSTEM ===
+def display_menu():
+    brain.screen.clear_screen()
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("=== PID TEST MENU ===")
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("Up: Turn 90 degrees")
+    brain.screen.set_cursor(3, 1)
+    brain.screen.print("Down: Turn 180 degrees")
+    brain.screen.set_cursor(4, 1)
+    brain.screen.print("Left: Drive straight")
+    brain.screen.set_cursor(5, 1)
+    brain.screen.print("Right: Square pattern")
+    brain.screen.set_cursor(7, 1)
+    brain.screen.print("Current PID values:")
+    brain.screen.set_cursor(8, 1)
+    brain.screen.print("Turn: P=" + str(test_turn_kp) + " D=" + str(test_turn_kd))
+    brain.screen.set_cursor(9, 1)
+    brain.screen.print("Drive: P=" + str(test_drive_kp) + " D=" + str(test_drive_kd))
+
+def main():
+    # Calibrate inertial sensor
+    brain.screen.clear_screen()
+    brain.screen.print("Calibrating Inertial...")
+    brain.screen.new_line()
+    brain.screen.print("DO NOT MOVE ROBOT")
+    
+    inertial.calibrate()
+    while inertial.is_calibrating():
+        wait(50, MSEC)
+    
+    brain.screen.new_line()
+    brain.screen.print("Calibration complete!")
+    wait(1000, MSEC)
+    
+    # Main menu loop
+    while True:
+        display_menu()
+        
+        # Wait for button press
+        while True:
+            if controller.buttonUp.pressing():
+                wait(200, MSEC)  # Debounce
+                test_turn_90()
+                break
+            elif controller.buttonDown.pressing():
+                wait(200, MSEC)
+                test_turn_180()
+                break
+            elif controller.buttonLeft.pressing():
+                wait(200, MSEC)
+                test_drive_straight()
+                break
+            elif controller.buttonRight.pressing():
+                wait(200, MSEC)
+                test_square_pattern()
+                break
+            
+            wait(20, MSEC)
+
+# Start the program
+main()
