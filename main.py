@@ -4,7 +4,7 @@
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
 # 	Description:  V5 project with PID control and custom brake settings        #
-#                 FIXED VERSION - corrected PID, brake logic, and pistons      #
+#                 UPDATED: Toggle pistons, stronger turn brake, cubic joystick #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -18,6 +18,7 @@ DRIVE_UPDATE_RATE = 20
 # Brake Settings
 DRIVE_BRAKE_STRENGTH_STRONG = 0.7  # Stronger brake option (0.0 = coast, 1.0 = full brake)
 DRIVE_BRAKE_STRENGTH_WEAK = 0.4    # Weaker brake option for testing
+TURN_BRAKE_MULTIPLIER = 1.3        # Makes braking stronger during turns
 ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG  # Driver prefers stronger
 
 # PID Constants (tune these values for your robot)
@@ -37,6 +38,16 @@ controller = Controller(PRIMARY)
 mg_piston = DigitalOut(brain.three_wire_port.g)  # Button A, medium goal
 ds_piston = DigitalOut(brain.three_wire_port.f)  # Button X, de-score
 ml_piston = DigitalOut(brain.three_wire_port.h)  # Button B, match load
+
+# Piston toggle states
+mg_piston_state = False
+ds_piston_state = False
+ml_piston_state = False
+
+# Button press tracking (to detect single press)
+button_a_was_pressed = False
+button_x_was_pressed = False
+button_b_was_pressed = False
 
 # Drivetrain motors
 left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
@@ -125,7 +136,24 @@ def apply_deadband(value, deadband=DEADBAND):
     """Apply deadband to joystick input to reduce drift."""
     return 0 if abs(value) < deadband else value
 
-def apply_custom_brake(current_speed, previous_speed, brake_strength):
+def apply_cubic_scaling(value):
+    """
+    Apply cubic scaling to joystick input for finer control at low speeds.
+    
+    Args:
+        value: Input value from -100 to 100
+    
+    Returns:
+        Cubic scaled value
+    """
+    # Normalize to -1 to 1
+    normalized = value / 100.0
+    # Apply cubic function
+    scaled = normalized ** 3
+    # Scale back to -100 to 100
+    return scaled * 100.0
+
+def apply_custom_brake(current_speed, previous_speed, brake_strength, is_turning=False):
     """
     Apply custom brake between BRAKE and COAST modes.
     
@@ -133,6 +161,7 @@ def apply_custom_brake(current_speed, previous_speed, brake_strength):
         current_speed: Commanded speed from driver (0 = wants to stop)
         previous_speed: Speed from previous loop iteration
         brake_strength: 0.0 = coast, 1.0 = full brake, values between = custom
+        is_turning: True if robot is turning (applies stronger brake)
     
     Returns:
         Adjusted speed with braking applied
@@ -141,9 +170,14 @@ def apply_custom_brake(current_speed, previous_speed, brake_strength):
     if abs(current_speed) > DEADBAND:
         return current_speed
     
+    # Apply stronger brake during turns
+    effective_brake = brake_strength
+    if is_turning:
+        effective_brake = min(1.0, brake_strength * TURN_BRAKE_MULTIPLIER)
+    
     # Driver wants to stop - apply proportional braking
     # Reduce speed based on brake strength
-    brake_factor = 1.0 - brake_strength
+    brake_factor = 1.0 - effective_brake
     new_speed = previous_speed * brake_factor
     
     # Stop completely when speed gets very low
@@ -256,9 +290,7 @@ def turn_to_heading(target_heading, timeout_ms=3000):
         else:
             settled_count = 0
         
-        # FIXED: Calculate turn power correctly
-        # Positive error means we need to turn right (clockwise)
-        # This makes left side go forward, right side go backward
+        # Calculate turn power correctly
         turn_power = pid.calculate(target_heading, current_heading)
         
         # Apply turning (tank turn)
@@ -378,54 +410,58 @@ def autonomous():
     
     # Turn to heading 180 degrees
     turn_to_heading(180)
-    
-    # Old encoder-based function still available:
-    # drive_straight_pid(1000, speed=50)
 
 # === DRIVER CONTROL ===
 def user_control():
     """Driver control mode - runs after autonomous."""
     global previous_left_speed, previous_right_speed
+    global mg_piston_state, ds_piston_state, ml_piston_state
+    global button_a_was_pressed, button_x_was_pressed, button_b_was_pressed
     
     brain.screen.clear_screen()
     brain.screen.print("Driver Control")
     brain.screen.new_line()
     brain.screen.print("Brake: " + str(ACTIVE_DRIVE_BRAKE))
     
-    # Calibrate inertial if not already done (in case driver control starts first)
+    # Calibrate inertial if not already done
     if not inertial.installed():
-        pass  # Sensor not connected
+        pass
     elif inertial.is_calibrating():
-        pass  # Already calibrating
+        pass
     else:
-        # Check if it needs calibration by trying to read heading
         try:
             test_heading = inertial.heading()
         except:
             inertial.calibrate()
     
     while True:
-        # === DRIVE CONTROL (ARCADE STYLE WITH CUSTOM BRAKE) ===
-        forward = apply_deadband(controller.axis1.position())
-        turn = apply_deadband(controller.axis3.position())
+        # === DRIVE CONTROL (ARCADE STYLE WITH CUBIC SCALING AND CUSTOM BRAKE) ===
+        # Get raw joystick values
+        raw_forward = apply_deadband(controller.axis1.position())
+        raw_turn = apply_deadband(controller.axis3.position())
+        
+        # Apply cubic scaling for finer control
+        forward = apply_cubic_scaling(raw_forward)
+        turn = apply_cubic_scaling(raw_turn)
         
         # Calculate desired speeds (arcade drive)
         desired_left_speed = forward - turn
         desired_right_speed = forward + turn
         
-        # FIXED: Apply custom brake properly
-        # Check if driver wants to stop (both sticks in deadband)
-        if abs(forward) < DEADBAND and abs(turn) < DEADBAND:
+        # Detect if turning (for stronger brake)
+        is_turning = abs(raw_turn) > DEADBAND
+        
+        # Apply custom brake properly
+        if abs(raw_forward) < DEADBAND and abs(raw_turn) < DEADBAND:
             # Driver released both sticks - apply custom brake
-            left_speed = apply_custom_brake(0, previous_left_speed, ACTIVE_DRIVE_BRAKE)
-            right_speed = apply_custom_brake(0, previous_right_speed, ACTIVE_DRIVE_BRAKE)
+            left_speed = apply_custom_brake(0, previous_left_speed, ACTIVE_DRIVE_BRAKE, is_turning)
+            right_speed = apply_custom_brake(0, previous_right_speed, ACTIVE_DRIVE_BRAKE, is_turning)
         else:
             # Driver is actively driving - use commanded speeds
             left_speed = desired_left_speed
             right_speed = desired_right_speed
         
-        # FIXED: Always use spin() to allow custom brake to work
-        # Never use stop() in driver control with custom brake
+        # Always use spin() to allow custom brake to work
         left_drive.spin(FORWARD, left_speed, PERCENT)
         right_drive.spin(FORWARD, right_speed, PERCENT)
         
@@ -445,24 +481,30 @@ def user_control():
         else:
             control_intake(0, 0)
         
-        # === PISTON CONTROL ===
-        # Medium Goal Piston - Button A
-        if controller.buttonA.pressing():
-            mg_piston.set(True)
-        else:
-            mg_piston.set(False)
+        # === PISTON CONTROL (TOGGLE MODE) ===
+        # Medium Goal Piston - Button A (toggle)
+        if controller.buttonA.pressing() and not button_a_was_pressed:
+            mg_piston_state = not mg_piston_state
+            mg_piston.set(mg_piston_state)
+            button_a_was_pressed = True
+        elif not controller.buttonA.pressing():
+            button_a_was_pressed = False
         
-        # De-score Piston - Button X
-        if controller.buttonX.pressing():
-            ds_piston.set(True)
-        else:
-            ds_piston.set(False)
+        # De-score Piston - Button X (toggle)
+        if controller.buttonX.pressing() and not button_x_was_pressed:
+            ds_piston_state = not ds_piston_state
+            ds_piston.set(ds_piston_state)
+            button_x_was_pressed = True
+        elif not controller.buttonX.pressing():
+            button_x_was_pressed = False
         
-        # Match Load Piston - Button B
-        if controller.buttonB.pressing():
-            ml_piston.set(True)
-        else:
-            ml_piston.set(False)
+        # Match Load Piston - Button B (toggle)
+        if controller.buttonB.pressing() and not button_b_was_pressed:
+            ml_piston_state = not ml_piston_state
+            ml_piston.set(ml_piston_state)
+            button_b_was_pressed = True
+        elif not controller.buttonB.pressing():
+            button_b_was_pressed = False
         
         wait(DRIVE_UPDATE_RATE, MSEC)
 
