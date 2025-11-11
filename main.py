@@ -4,6 +4,7 @@
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
 # 	Description:  V5 project with PID control and custom brake settings        #
+#                 FIXED VERSION - corrected PID, brake logic, and pistons      #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -32,10 +33,10 @@ TURN_KD = 0.15      # Derivative gain
 brain = Brain()
 controller = Controller(PRIMARY)
 
-# Pistons
-MG_piston = adi.DigitalOut('G') #Button A, medium goal
-DS_piston = adi.DigitalOut('E') #Button X, de-score
-ML_piston = adi.DigitalOut('H') #Button B, match load
+# Pneumatic Pistons (DigitalOut for single solenoids)
+mg_piston = DigitalOut(brain.three_wire_port.g)  # Button A, medium goal
+ds_piston = DigitalOut(brain.three_wire_port.f)  # Button X, de-score
+ml_piston = DigitalOut(brain.three_wire_port.h)  # Button B, match load
 
 # Drivetrain motors
 left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
@@ -48,17 +49,16 @@ right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
 left_drive = MotorGroup(left_motor_a, left_motor_b, left_motor_c)
 right_drive = MotorGroup(right_motor_a, right_motor_b, right_motor_c)
 
-# Configure brake modes
-# Turn motors: BRAKE mode for precise control
-left_drive.set_stopping(BRAKE)
-right_drive.set_stopping(BRAKE)
+# Configure brake modes - COAST for custom brake to work properly
+left_drive.set_stopping(COAST)
+right_drive.set_stopping(COAST)
 
 # Intake motors
-intake_blue = Motor(Ports.PORT6, GearSetting.RATIO_18_1, False)
+intake_blue = Motor(Ports.PORT8, GearSetting.RATIO_18_1, False)
 intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
 
 # Inertial sensor for PID
-inertial = Inertial(Ports.PORT1)
+inertial = Inertial(Ports.PORT10)
 
 # === CUSTOM BRAKE VARIABLES ===
 previous_left_speed = 0
@@ -97,7 +97,8 @@ class PIDController:
         # Integral term (with anti-windup)
         self.integral += error * dt
         # Limit integral to prevent windup
-        self.integral = max(-50, min(50, self.integral))
+        max_integral = 50 / max(self.ki, 0.01)  # Adaptive limit based on Ki
+        self.integral = max(-max_integral, min(max_integral, self.integral))
         i_term = self.ki * self.integral
         
         # Derivative term
@@ -214,8 +215,8 @@ def drive_straight_pid(distance_degrees, speed=50):
         wait(DRIVE_UPDATE_RATE, MSEC)
     
     # Stop motors
-    left_drive.stop()
-    right_drive.stop()
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
 
 def turn_to_heading(target_heading, timeout_ms=3000):
     """
@@ -255,12 +256,14 @@ def turn_to_heading(target_heading, timeout_ms=3000):
         else:
             settled_count = 0
         
-        # Calculate turn power (negative error = need to turn left)
-        turn_power = pid.calculate(0, error)
+        # FIXED: Calculate turn power correctly
+        # Positive error means we need to turn right (clockwise)
+        # This makes left side go forward, right side go backward
+        turn_power = pid.calculate(target_heading, current_heading)
         
-        # Apply opposite speeds to turn (left motor forward, right motor backward)
+        # Apply turning (tank turn)
         left_drive.spin(FORWARD, turn_power, PERCENT)
-        right_drive.spin(REVERSE, turn_power, PERCENT)
+        right_drive.spin(FORWARD, -turn_power, PERCENT)
         
         wait(DRIVE_UPDATE_RATE, MSEC)
     
@@ -389,40 +392,42 @@ def user_control():
     brain.screen.new_line()
     brain.screen.print("Brake: " + str(ACTIVE_DRIVE_BRAKE))
     
+    # Calibrate inertial if not already done (in case driver control starts first)
+    if not inertial.installed():
+        pass  # Sensor not connected
+    elif inertial.is_calibrating():
+        pass  # Already calibrating
+    else:
+        # Check if it needs calibration by trying to read heading
+        try:
+            test_heading = inertial.heading()
+        except:
+            inertial.calibrate()
+    
     while True:
         # === DRIVE CONTROL (ARCADE STYLE WITH CUSTOM BRAKE) ===
-        forward = apply_deadband(controller.axis3.position())
-        turn = apply_deadband(controller.axis1.position())
+        forward = apply_deadband(controller.axis1.position())
+        turn = apply_deadband(controller.axis3.position())
         
         # Calculate desired speeds (arcade drive)
-        desired_left_speed = forward + turn
-        desired_right_speed = forward - turn
+        desired_left_speed = forward - turn
+        desired_right_speed = forward + turn
         
-        # Apply custom brake when driver releases sticks (for drive only, not turns)
-        # Only apply custom brake to forward/backward motion
-        if abs(forward) < DEADBAND and abs(turn) >= DEADBAND:
-            # Driver is turning only - use standard BRAKE mode (already set)
-            left_speed = desired_left_speed
-            right_speed = desired_right_speed
-        elif abs(forward) < DEADBAND and abs(turn) < DEADBAND:
-            # Driver released both sticks - apply custom brake to forward motion
-            left_speed = apply_custom_brake(desired_left_speed, previous_left_speed, ACTIVE_DRIVE_BRAKE)
-            right_speed = apply_custom_brake(desired_right_speed, previous_right_speed, ACTIVE_DRIVE_BRAKE)
+        # FIXED: Apply custom brake properly
+        # Check if driver wants to stop (both sticks in deadband)
+        if abs(forward) < DEADBAND and abs(turn) < DEADBAND:
+            # Driver released both sticks - apply custom brake
+            left_speed = apply_custom_brake(0, previous_left_speed, ACTIVE_DRIVE_BRAKE)
+            right_speed = apply_custom_brake(0, previous_right_speed, ACTIVE_DRIVE_BRAKE)
         else:
             # Driver is actively driving - use commanded speeds
             left_speed = desired_left_speed
             right_speed = desired_right_speed
         
-        # Send speeds to motors
-        if abs(left_speed) < 1:
-            left_drive.stop(BRAKE)  # Use BRAKE for turns
-        else:
-            left_drive.spin(FORWARD, left_speed, PERCENT)
-        
-        if abs(right_speed) < 1:
-            right_drive.stop(BRAKE)  # Use BRAKE for turns
-        else:
-            right_drive.spin(FORWARD, right_speed, PERCENT)
+        # FIXED: Always use spin() to allow custom brake to work
+        # Never use stop() in driver control with custom brake
+        left_drive.spin(FORWARD, left_speed, PERCENT)
+        right_drive.spin(FORWARD, right_speed, PERCENT)
         
         # Store speeds for next iteration
         previous_left_speed = left_speed
@@ -443,21 +448,21 @@ def user_control():
         # === PISTON CONTROL ===
         # Medium Goal Piston - Button A
         if controller.buttonA.pressing():
-            MG_piston.set(True)
+            mg_piston.set(True)
         else:
-            MG_piston.set(False)
+            mg_piston.set(False)
         
         # De-score Piston - Button X
         if controller.buttonX.pressing():
-            DS_piston.set(True)
+            ds_piston.set(True)
         else:
-            DS_piston.set(False)
+            ds_piston.set(False)
         
         # Match Load Piston - Button B
         if controller.buttonB.pressing():
-            ML_piston.set(True)
+            ml_piston.set(True)
         else:
-            ML_piston.set(False)
+            ml_piston.set(False)
         
         wait(DRIVE_UPDATE_RATE, MSEC)
 
