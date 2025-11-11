@@ -3,7 +3,7 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project with PID control and custom brake settings       #
+# 	Description:  V5 project with PID control and custom brake settings        #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -57,8 +57,8 @@ right_drive.set_stopping(BRAKE)
 intake_blue = Motor(Ports.PORT6, GearSetting.RATIO_18_1, False)
 intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
 
-# Inertial sensor for PID (Add the port below)
-# inertial = Inertial(Ports.PORT1)
+# Inertial sensor for PID
+inertial = Inertial(Ports.PORT1)
 
 # === CUSTOM BRAKE VARIABLES ===
 previous_left_speed = 0
@@ -217,43 +217,132 @@ def drive_straight_pid(distance_degrees, speed=50):
     left_drive.stop()
     right_drive.stop()
 
-def turn_pid(target_degrees):
+def turn_to_heading(target_heading, timeout_ms=3000):
     """
-    Turn to a specific angle using PID (requires inertial sensor).
+    Turn to an absolute heading using PID and inertial sensor.
     
     Args:
-        target_degrees: Target angle in degrees (positive = right, negative = left)
+        target_heading: Target heading in degrees (0-360)
+        timeout_ms: Maximum time to attempt turn in milliseconds
+    
+    Returns:
+        True if target reached, False if timeout
     """
-    # NOTE: Uncomment this function when using the intertial sensor
-    '''
     pid = PIDController(TURN_KP, TURN_KI, TURN_KD)
     
-    inertial.set_heading(0, DEGREES)
     tolerance = 2  # degrees
+    settled_count = 0
+    settled_threshold = 3  # Need to be within tolerance for this many loops
+    start_time = brain.timer.time(MSEC)
     
-    while True:
+    while brain.timer.time(MSEC) - start_time < timeout_ms:
         current_heading = inertial.heading(DEGREES)
         
-        # Normalize angle to -180 to 180
-        if current_heading > 180:
-            current_heading -= 360
+        # Calculate shortest path to target (handles 0/360 wraparound)
+        error = target_heading - current_heading
+        if error > 180:
+            error -= 360
+        elif error < -180:
+            error += 360
         
-        if abs(current_heading - target_degrees) < tolerance:
-            break
+        # Check if we're at target
+        if abs(error) < tolerance:
+            settled_count += 1
+            if settled_count >= settled_threshold:
+                left_drive.stop(BRAKE)
+                right_drive.stop(BRAKE)
+                return True
+        else:
+            settled_count = 0
         
-        # Calculate turn power
-        turn_power = pid.calculate(target_degrees, current_heading)
+        # Calculate turn power (negative error = need to turn left)
+        turn_power = pid.calculate(0, error)
         
-        # Apply opposite speeds to turn
+        # Apply opposite speeds to turn (left motor forward, right motor backward)
         left_drive.spin(FORWARD, turn_power, PERCENT)
-        right_drive.spin(FORWARD, -turn_power, PERCENT)
+        right_drive.spin(REVERSE, turn_power, PERCENT)
         
         wait(DRIVE_UPDATE_RATE, MSEC)
     
-    left_drive.stop()
-    right_drive.stop()
-    '''
-    pass
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
+    return False
+
+def move_distance(distance_inches, speed=50, timeout_ms=5000):
+    """
+    Move forward/backward a specific distance using motor encoders.
+    
+    Args:
+        distance_inches: Distance to travel in inches (positive = forward, negative = backward)
+        speed: Base speed percentage (0-100)
+        timeout_ms: Maximum time to attempt move in milliseconds
+    
+    Returns:
+        True if target reached, False if timeout
+    """
+    # Robot specifications
+    WHEEL_DIAMETER = 3.25  # inches
+    GEAR_RATIO = 1.67      # motor rotations : wheel rotations
+    
+    # Calculate wheel circumference
+    wheel_circumference = WHEEL_DIAMETER * 3.14159265359
+    
+    # Calculate required wheel rotations
+    wheel_rotations = distance_inches / wheel_circumference
+    
+    # Calculate required motor degrees (accounting for gear ratio)
+    motor_degrees = wheel_rotations * 360 * GEAR_RATIO
+    
+    # Create PID controller for driving straight
+    pid = PIDController(DRIVE_KP, DRIVE_KI, DRIVE_KD)
+    
+    # Reset motor encoders
+    left_drive.set_position(0, DEGREES)
+    right_drive.set_position(0, DEGREES)
+    
+    # Determine direction
+    direction = FORWARD if motor_degrees > 0 else REVERSE
+    target_position = abs(motor_degrees)
+    speed = abs(speed)
+    
+    tolerance = 15  # degrees
+    start_time = brain.timer.time(MSEC)
+    
+    while brain.timer.time(MSEC) - start_time < timeout_ms:
+        # Get current positions (absolute values)
+        left_pos = abs(left_drive.position(DEGREES))
+        right_pos = abs(right_drive.position(DEGREES))
+        
+        # Average position
+        avg_pos = (left_pos + right_pos) / 2
+        
+        # Check if target reached
+        if avg_pos >= target_position - tolerance:
+            left_drive.stop(BRAKE)
+            right_drive.stop(BRAKE)
+            return True
+        
+        # Calculate correction to keep robot straight
+        position_diff = right_pos - left_pos
+        correction = pid.calculate(0, position_diff)
+        
+        # Apply speeds with correction
+        left_speed = speed - correction
+        right_speed = speed + correction
+        
+        # Clamp speeds to valid range
+        left_speed = max(10, min(100, abs(left_speed)))
+        right_speed = max(10, min(100, abs(right_speed)))
+        
+        left_drive.spin(direction, left_speed, PERCENT)
+        right_drive.spin(direction, right_speed, PERCENT)
+        
+        wait(DRIVE_UPDATE_RATE, MSEC)
+    
+    # Timeout - stop motors
+    left_drive.stop(BRAKE)
+    right_drive.stop(BRAKE)
+    return False
 
 # === AUTONOMOUS ===
 def autonomous():
@@ -261,16 +350,34 @@ def autonomous():
     brain.screen.clear_screen()
     brain.screen.print("Autonomous Mode")
     
-    # Example autonomous routine using PID
-    # Drive forward 1000 degrees
-    drive_straight_pid(1000, speed=50)
-    wait(500, MSEC)
+    # Calibrate inertial sensor at start
+    brain.screen.new_line()
+    brain.screen.print("Calibrating...")
+    inertial.calibrate()
+    while inertial.is_calibrating():
+        wait(50, MSEC)
+    brain.screen.new_line()
+    brain.screen.print("Ready!")
     
-    # Drive backward
-    drive_straight_pid(-1000, speed=50)
+    # Example autonomous routine using new functions
     
-    # Turn (requires inertial sensor)
-    # turn_pid(90)  # Turn 90 degrees right
+    # Move forward 24 inches at 60% speed
+    move_distance(24, speed=60)
+    wait(300, MSEC)
+    
+    # Turn to heading 90 degrees
+    turn_to_heading(90)
+    wait(300, MSEC)
+    
+    # Move backward 12 inches
+    move_distance(-12, speed=50)
+    wait(300, MSEC)
+    
+    # Turn to heading 180 degrees
+    turn_to_heading(180)
+    
+    # Old encoder-based function still available:
+    # drive_straight_pid(1000, speed=50)
 
 # === DRIVER CONTROL ===
 def user_control():
