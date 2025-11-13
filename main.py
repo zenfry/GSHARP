@@ -3,7 +3,7 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project with proportional control and custom brake       #
+# 	Description:  V5 project with PD control and custom brake                 #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -20,11 +20,15 @@ DRIVE_BRAKE_STRENGTH_WEAK = 0.4
 TURN_BRAKE_MULTIPLIER = 1.3
 ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG
 
-# Proportional Control Constants
-KP_DRIVE = 0.42  # Proportional gain for driving straight (tune this!)
-KP_TURN = 0.2   # Proportional gain for turning (tune this!)
-MIN_POWER = 15  # Minimum power to overcome friction
-MAX_POWER = 80  # Maximum power for safety
+# PD Control Constants
+KP_DRIVE = 0.25  # Proportional gain for driving straight
+KD_DRIVE = 0.25  # Derivative gain for driving straight (tune this!)
+KP_TURN = 0.15   # Proportional gain for turning
+KD_TURN = 0.05   # Derivative gain for turning (tune this!)
+MIN_POWER = 12   # Minimum power to overcome friction
+MAX_POWER = 80   # Maximum power for safety
+
+#205=90
 
 # === DEVICE CONFIGURATION ===
 brain = Brain()
@@ -46,12 +50,12 @@ button_x_was_pressed = False
 button_b_was_pressed = False
 
 # Drivetrain motors
-left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, False)
-left_motor_b = Motor(Ports.PORT12, GearSetting.RATIO_18_1, False)
-left_motor_c = Motor(Ports.PORT13, GearSetting.RATIO_18_1, True)
-right_motor_a = Motor(Ports.PORT15, GearSetting.RATIO_18_1, True)
-right_motor_b = Motor(Ports.PORT14, GearSetting.RATIO_18_1, True)
-right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, False)
+left_motor_a = Motor(Ports.PORT11, GearSetting.RATIO_18_1, True)
+left_motor_b = Motor(Ports.PORT12, GearSetting.RATIO_18_1, True)
+left_motor_c = Motor(Ports.PORT13, GearSetting.RATIO_18_1, False)
+right_motor_a = Motor(Ports.PORT15, GearSetting.RATIO_18_1, False)
+right_motor_b = Motor(Ports.PORT14, GearSetting.RATIO_18_1, False)
+right_motor_c = Motor(Ports.PORT16, GearSetting.RATIO_18_1, True)
 
 left_drive = MotorGroup(left_motor_a, left_motor_b, left_motor_c)
 right_drive = MotorGroup(right_motor_a, right_motor_b, right_motor_c)
@@ -108,7 +112,7 @@ def control_intake(blue_speed, small_speed):
     else:
         intake_small.spin(FORWARD if small_speed > 0 else REVERSE, abs(small_speed), PERCENT)
 
-# === PROPORTIONAL CONTROL FUNCTIONS ===
+# === PD CONTROL FUNCTIONS ===
 def reset_drive_encoders():
     """Reset all drive motor encoders to zero."""
     left_drive.set_position(0, DEGREES)
@@ -122,9 +126,9 @@ def clamp(value, min_val, max_val):
     """Clamp a value between min and max."""
     return max(min_val, min(max_val, value))
 
-def drive_forward_proportional(target_degrees, timeout_sec=5.0):
+def drive_forward_pd(target_degrees, timeout_sec=5.0):
     """
-    Drive forward using proportional control.
+    Drive forward using PD (Proportional-Derivative) control.
     
     Args:
         target_degrees: Distance to travel in encoder degrees
@@ -132,10 +136,11 @@ def drive_forward_proportional(target_degrees, timeout_sec=5.0):
     """
     reset_drive_encoders()
     
-    brain.screen.print("Driving: " + str(target_degrees) + " deg")
+    brain.screen.print("PD Drive: " + str(target_degrees) + " deg")
     brain.screen.new_line()
     
     start_time = brain.timer.time(SECONDS)
+    previous_error = 0
     
     while True:
         # Calculate error
@@ -152,8 +157,11 @@ def drive_forward_proportional(target_degrees, timeout_sec=5.0):
             brain.screen.new_line()
             break
         
-        # Calculate proportional power
-        power = error * KP_DRIVE
+        # Calculate derivative (rate of change of error)
+        derivative = error - previous_error
+        
+        # Calculate PD power
+        power = (error * KP_DRIVE) + (derivative * KD_DRIVE)
         
         # Add minimum power to overcome friction (only when far from target)
         if abs(error) > 50:
@@ -169,6 +177,9 @@ def drive_forward_proportional(target_degrees, timeout_sec=5.0):
         left_drive.spin(FORWARD, power, PERCENT)
         right_drive.spin(FORWARD, power, PERCENT)
         
+        # Store error for next iteration
+        previous_error = error
+        
         wait(20, MSEC)
     
     # Stop with brake
@@ -178,9 +189,9 @@ def drive_forward_proportional(target_degrees, timeout_sec=5.0):
     brain.screen.print("Final: " + str(get_average_encoder_value()))
     brain.screen.new_line()
 
-def turn_proportional(target_degrees, timeout_sec=3.0):
+def turn_pd(target_degrees, timeout_sec=3.0):
     """
-    Turn using proportional control.
+    Turn using PD (Proportional-Derivative) control.
     
     Args:
         target_degrees: Angle to turn (positive = right, negative = left)
@@ -188,10 +199,11 @@ def turn_proportional(target_degrees, timeout_sec=3.0):
     """
     reset_drive_encoders()
     
-    brain.screen.print("Turning: " + str(target_degrees) + " deg")
+    brain.screen.print("PD Turn: " + str(target_degrees) + " deg")
     brain.screen.new_line()
     
     start_time = brain.timer.time(SECONDS)
+    previous_error = 0
     
     while True:
         # For turning, we use the difference between left and right
@@ -208,8 +220,11 @@ def turn_proportional(target_degrees, timeout_sec=3.0):
             brain.screen.new_line()
             break
         
-        # Calculate proportional power
-        power = error * KP_TURN
+        # Calculate derivative
+        derivative = error - previous_error
+        
+        # Calculate PD power
+        power = (error * KP_TURN) + (derivative * KD_TURN)
         
         # Add minimum power
         if abs(error) > 20:
@@ -225,6 +240,9 @@ def turn_proportional(target_degrees, timeout_sec=3.0):
         left_drive.spin(FORWARD, power, PERCENT)
         right_drive.spin(REVERSE, power, PERCENT)
         
+        # Store error for next iteration
+        previous_error = error
+        
         wait(20, MSEC)
     
     # Stop with brake
@@ -234,46 +252,213 @@ def turn_proportional(target_degrees, timeout_sec=3.0):
     brain.screen.print("Turn complete")
     brain.screen.new_line()
 
+# === HIGH-LEVEL AUTONOMOUS FUNCTIONS ===
+
+def moving(degrees, timeout_sec=5.0):
+    """
+    Move forward or backward a specified number of degrees.
+    Positive = forward, Negative = backward
+    """
+    drive_forward_pd(degrees, timeout_sec)
+
+def turn_right(degrees, timeout_sec=3.0):
+    """Turn right a specified number of degrees."""
+    turn_pd(degrees, timeout_sec)
+
+def turn_left(degrees, timeout_sec=3.0):
+    """Turn left a specified number of degrees."""
+    turn_pd(-degrees, timeout_sec)
+
+def intake_both(speed=INTAKE_SPEED, duration_sec=None):
+    """
+    Run both intake motors at the same speed.
+    
+    Args:
+        speed: Motor speed (-100 to 100, negative = reverse)
+        duration_sec: If specified, run for this duration then stop
+    """
+    intake_blue.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
+    intake_small.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
+    if duration_sec is not None:
+        wait(duration_sec, SECONDS)
+        intake_blue.stop()
+        intake_small.stop()
+
+def intake_small(speed=INTAKE_SPEED, duration_sec=None):
+    """
+    Run the small intake motor.
+    
+    Args:
+        speed: Motor speed (-100 to 100, negative = reverse)
+        duration_sec: If specified, run for this duration then stop
+    """
+    intake_small.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
+    if duration_sec is not None:
+        wait(duration_sec, SECONDS)
+        intake_small.stop()
+
+def intake_blue(speed=INTAKE_SPEED, duration_sec=None):
+    """
+    Run the blue intake motor.
+    
+    Args:
+        speed: Motor speed (-100 to 100, negative = reverse)
+        duration_sec: If specified, run for this duration then stop
+    """
+    intake_blue.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
+    if duration_sec is not None:
+        wait(duration_sec, SECONDS)
+        intake_blue.stop()
+
+def stop_intakes():
+    """Stop all intake motors."""
+    intake_blue.stop()
+    intake_small.stop()
+
+def piston_G(state):
+    """
+    Control the G piston (mg_piston on port G).
+    
+    Args:
+        state: "on" or "off" (can also use True/False or 1/0)
+    """
+    global mg_piston_state
+    if state in ["on", True, 1]:
+        mg_piston_state = True
+        mg_piston.set(True)
+    else:
+        mg_piston_state = False
+        mg_piston.set(False)
+
+def piston_H(state):
+    """
+    Control the H piston (ml_piston on port H).
+    
+    Args:
+        state: "on" or "off" (can also use True/False or 1/0)
+    """
+    global ml_piston_state
+    if state in ["on", True, 1]:
+        ml_piston_state = True
+        ml_piston.set(True)
+    else:
+        ml_piston_state = False
+        ml_piston.set(False)
+
+def piston_F(state):
+    """
+    Control the F piston (ds_piston on port F).
+    
+    Args:
+        state: "on" or "off" (can also use True/False or 1/0)
+    """
+    global ds_piston_state
+    if state in ["on", True, 1]:
+        ds_piston_state = True
+        ds_piston.set(True)
+    else:
+        ds_piston_state = False
+        ds_piston.set(False)
+
 # === AUTONOMOUS ===
 def autonomous():
-    """Autonomous mode with proportional control testing."""
+    """Autonomous mode - build your routine here!"""
     brain.screen.clear_screen()
-    brain.screen.print("Autonomous - P Control")
+    brain.screen.print("Autonomous Started")
     brain.screen.new_line()
     
-    wait(0.5, SECONDS)
+    piston_G("on")
+    wait(0.3, SECONDS)
     
-    # Test 1: Drive forward 1000 degrees (about 2.78 rotations)
-    brain.screen.print("Test 1: Forward")
-    brain.screen.new_line()
-    drive_forward_proportional(1000)
-    wait(1, SECONDS)
+    intake_both(100, 1.0)
     
-    # Test 2: Turn right 90 degrees (approximate - tune this value!)
-    brain.screen.print("Test 2: Turn Right")
-    brain.screen.new_line()
-    turn_proportional(200)  # This value depends on your robot's width
-    wait(1, SECONDS)
+    moving(500)
+    wait(0.2, SECONDS)
     
-    # Test 3: Drive forward again
-    brain.screen.print("Test 3: Forward")
-    brain.screen.new_line()
-    drive_forward_proportional(30)
-    wait(1, SECONDS)
+    piston_G("off")
+    wait(0.2, SECONDS)
     
-    # Test 4: Turn left
-    brain.screen.print("Test 4: Turn Left")
-    brain.screen.new_line()
-    turn_proportional(-200)
-    wait(1, SECONDS)
+    turn_right(200)
+    wait(0.2, SECONDS)
     
-    # Test 5: Drive backward
-    brain.screen.print("Test 5: Backward")
-    brain.screen.new_line()
-    drive_forward_proportional(-600)
+    moving(300)
+    wait(0.2, SECONDS)
+    
+    intake_both(-100, 0.5)
+    stop_intakes()
+    
+    moving(-300)
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
+    
+    
+# === PD TUNING TEST FUNCTION ===
+def test_pd_tuning():
+    """Use this function to test and tune your PD values."""
+    brain.screen.clear_screen()
+    brain.screen.print("PD Tuning Tests")
+    brain.screen.new_line()
+    brain.screen.print("KP_D:" + str(KP_DRIVE) + " KD_D:" + str(KD_DRIVE))
+    brain.screen.new_line()
+    brain.screen.print("KP_T:" + str(KP_TURN) + " KD_T:" + str(KD_TURN))
+    brain.screen.new_line()
+    
+    wait(1, SECONDS)
+    
+    # Test 1: Quick acceleration test
+    brain.screen.print("Test 1: Quick Start/Stop")
+    brain.screen.new_line()
+    moving(500)
+    wait(0.5, SECONDS)
+    
+    # Test 2: Precision positioning
+    brain.screen.print("Test 2: Precision Moves")
+    brain.screen.new_line()
+    moving(200)
+    wait(0.3, SECONDS)
+    moving(200)
+    wait(0.3, SECONDS)
+    moving(200)
+    wait(0.5, SECONDS)
+    
+    # Test 3: Sharp turn
+    brain.screen.print("Test 3: Sharp Right Turn")
+    brain.screen.new_line()
+    turn_right(300)
+    wait(0.5, SECONDS)
+    
+    # Test 4: Drive and turn sequence
+    brain.screen.print("Test 4: Drive + Turn")
+    brain.screen.new_line()
+    moving(800)
+    wait(0.3, SECONDS)
+    turn_left(300)
+    wait(0.3, SECONDS)
+    moving(400)
+    wait(0.5, SECONDS)
+    
+    # Test 5: Reverse
+    brain.screen.print("Test 5: Reverse")
+    brain.screen.new_line()
+    moving(-600)
+    wait(0.5, SECONDS)
+    
+    # Test 6: Quick direction changes
+    brain.screen.print("Test 6: Quick Changes")
+    brain.screen.new_line()
+    moving(300)
+    wait(0.2, SECONDS)
+    turn_right(150)
+    wait(0.2, SECONDS)
+    moving(-300)
+    wait(0.2, SECONDS)
+    turn_left(150)
+    
+    brain.screen.new_line()
+    brain.screen.print("Tuning Tests Complete!")
+    
+# To use the tuning tests, temporarily change autonomous() to call test_pd_tuning()
 
 # === DRIVER CONTROL ===
 def user_control():
@@ -295,8 +480,8 @@ def user_control():
         forward = apply_cubic_scaling(raw_forward)
         turn = apply_cubic_scaling(raw_turn)
         
-        desired_left_speed = forward - turn
-        desired_right_speed = forward + turn
+        desired_left_speed = forward + turn
+        desired_right_speed = forward - turn
         
         is_turning = abs(raw_turn) > DEADBAND
         
@@ -355,8 +540,8 @@ comp = Competition(user_control, autonomous)
 brain.screen.clear_screen()
 brain.screen.print("Program Started")
 brain.screen.new_line()
-brain.screen.print("P Control Ready")
+brain.screen.print("PD Control Ready")
 brain.screen.new_line()
-brain.screen.print("KP_DRIVE: " + str(KP_DRIVE))
+brain.screen.print("KP_D:" + str(KP_DRIVE) + " KD_D:" + str(KD_DRIVE))
 brain.screen.new_line()
-brain.screen.print("KP_TURN: " + str(KP_TURN))
+brain.screen.print("KP_T:" + str(KP_TURN) + " KD_T:" + str(KD_TURN))
