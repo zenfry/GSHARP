@@ -3,7 +3,7 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project with PD control and custom brake                 #
+# 	Description:  V5 project with PD control, custom brake, and inertial      #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 # Library imports
@@ -20,19 +20,24 @@ DRIVE_BRAKE_STRENGTH_WEAK = 0.4
 TURN_BRAKE_MULTIPLIER = 1.3
 ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG
 
-# PD Control Constants
+# PD Control Constants for Drive
 KP_DRIVE = 0.25  # Proportional gain for driving straight
-KD_DRIVE = 0.25  # Derivative gain for driving straight (tune this!)
-KP_TURN = 0.15   # Proportional gain for turning
-KD_TURN = 0.05   # Derivative gain for turning (tune this!)
+KD_DRIVE = 0.25  # Derivative gain for driving straight
 MIN_POWER = 12   # Minimum power to overcome friction
 MAX_POWER = 80   # Maximum power for safety
 
-#205=90
+# PD Control Constants for Inertial Turns
+KP_INERTIAL = 0.7   # Proportional gain for inertial turning
+KD_INERTIAL = 0.2  # Derivative gain for inertial turning
+MIN_TURN_POWER = 10
+MAX_TURN_POWER = 45
 
 # === DEVICE CONFIGURATION ===
 brain = Brain()
 controller = Controller(PRIMARY)
+
+# Inertial Sensor (change port as needed)
+inertial = Inertial(Ports.PORT10)
 
 # Pneumatic Pistons (DigitalOut for single solenoids)
 mg_piston = DigitalOut(brain.three_wire_port.g)
@@ -71,6 +76,23 @@ intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
 # === CUSTOM BRAKE VARIABLES ===
 previous_left_speed = 0
 previous_right_speed = 0
+
+# === INERTIAL SENSOR INITIALIZATION ===
+def calibrate_inertial():
+    """Calibrate the inertial sensor. Must be done while robot is stationary!"""
+    brain.screen.clear_screen()
+    brain.screen.print("Calibrating Inertial...")
+    brain.screen.new_line()
+    brain.screen.print("DO NOT MOVE ROBOT!")
+    
+    inertial.calibrate()
+    
+    while inertial.is_calibrating():
+        wait(50, MSEC)
+    
+    brain.screen.new_line()
+    brain.screen.print("Calibration Complete!")
+    wait(0.5, SECONDS)
 
 # === HELPER FUNCTIONS ===
 def apply_deadband(value, deadband=DEADBAND):
@@ -128,13 +150,14 @@ def clamp(value, min_val, max_val):
 
 def drive_forward_pd(target_degrees, timeout_sec=5.0):
     """
-    Drive forward using PD (Proportional-Derivative) control.
+    Drive forward using PD (Proportional-Derivative) control with gyro correction.
     
     Args:
         target_degrees: Distance to travel in encoder degrees
         timeout_sec: Maximum time to wait (safety)
     """
     reset_drive_encoders()
+    initial_heading = inertial.heading(DEGREES)
     
     brain.screen.print("PD Drive: " + str(target_degrees) + " deg")
     brain.screen.new_line()
@@ -173,9 +196,22 @@ def drive_forward_pd(target_degrees, timeout_sec=5.0):
         # Clamp to safe limits
         power = clamp(power, -MAX_POWER, MAX_POWER)
         
-        # Apply power
-        left_drive.spin(FORWARD, power, PERCENT)
-        right_drive.spin(FORWARD, power, PERCENT)
+        # Gyro correction to drive straight
+        current_heading = inertial.heading(DEGREES)
+        heading_error = initial_heading - current_heading
+        
+        # Normalize heading error to -180 to 180
+        if heading_error > 180:
+            heading_error -= 360
+        elif heading_error < -180:
+            heading_error += 360
+        
+        # Apply correction (small proportional adjustment)
+        correction = heading_error * 0.5
+        
+        # Apply power with correction
+        left_drive.spin(FORWARD, power + correction, PERCENT)
+        right_drive.spin(FORWARD, power - correction, PERCENT)
         
         # Store error for next iteration
         previous_error = error
@@ -189,29 +225,34 @@ def drive_forward_pd(target_degrees, timeout_sec=5.0):
     brain.screen.print("Final: " + str(get_average_encoder_value()))
     brain.screen.new_line()
 
-def turn_pd(target_degrees, timeout_sec=3.0):
+def turn_to_heading(target_heading, timeout_sec=3.0):
     """
-    Turn using PD (Proportional-Derivative) control.
+    Turn to an absolute heading using inertial sensor with PD control.
     
     Args:
-        target_degrees: Angle to turn (positive = right, negative = left)
+        target_heading: Target heading in degrees (0-360)
         timeout_sec: Maximum time to wait
     """
-    reset_drive_encoders()
-    
-    brain.screen.print("PD Turn: " + str(target_degrees) + " deg")
+    brain.screen.print("Turn to: " + str(target_heading) + " deg")
     brain.screen.new_line()
     
     start_time = brain.timer.time(SECONDS)
     previous_error = 0
     
     while True:
-        # For turning, we use the difference between left and right
-        current_position = (left_drive.position(DEGREES) - right_drive.position(DEGREES)) / 2.0
-        error = target_degrees - current_position
+        current_heading = inertial.heading(DEGREES)
+        
+        # Calculate error (shortest path)
+        error = target_heading - current_heading
+        
+        # Normalize error to -180 to 180 (shortest turn direction)
+        if error > 180:
+            error -= 360
+        elif error < -180:
+            error += 360
         
         # Check if done
-        if abs(error) < 5:  # Within 5 degrees for turns
+        if abs(error) < 2:  # Within 2 degrees
             break
         
         # Timeout check
@@ -224,19 +265,19 @@ def turn_pd(target_degrees, timeout_sec=3.0):
         derivative = error - previous_error
         
         # Calculate PD power
-        power = (error * KP_TURN) + (derivative * KD_TURN)
+        power = (error * KP_INERTIAL) + (derivative * KD_INERTIAL)
         
         # Add minimum power
-        if abs(error) > 20:
+        if abs(error) > 10:
             if power > 0:
-                power = max(power, MIN_POWER)
+                power = max(power, MIN_TURN_POWER)
             else:
-                power = min(power, -MIN_POWER)
+                power = min(power, -MIN_TURN_POWER)
         
         # Clamp power
-        power = clamp(power, -MAX_POWER, MAX_POWER)
+        power = clamp(power, -MAX_TURN_POWER, MAX_TURN_POWER)
         
-        # Apply opposite power to each side for turning
+        # Apply power (positive error = turn right)
         left_drive.spin(FORWARD, power, PERCENT)
         right_drive.spin(REVERSE, power, PERCENT)
         
@@ -249,8 +290,20 @@ def turn_pd(target_degrees, timeout_sec=3.0):
     left_drive.stop(BRAKE)
     right_drive.stop(BRAKE)
     
-    brain.screen.print("Turn complete")
+    brain.screen.print("Heading: " + str(inertial.heading(DEGREES)))
     brain.screen.new_line()
+
+def turn_relative(degrees, timeout_sec=3.0):
+    """
+    Turn relative to current heading using inertial sensor.
+    
+    Args:
+        degrees: Degrees to turn (positive = right, negative = left)
+        timeout_sec: Maximum time to wait
+    """
+    current_heading = inertial.heading(DEGREES)
+    target_heading = (current_heading + degrees) % 360
+    turn_to_heading(target_heading, timeout_sec)
 
 # === HIGH-LEVEL AUTONOMOUS FUNCTIONS ===
 
@@ -262,12 +315,16 @@ def moving(degrees, timeout_sec=5.0):
     drive_forward_pd(degrees, timeout_sec)
 
 def turn_right(degrees, timeout_sec=3.0):
-    """Turn right a specified number of degrees."""
-    turn_pd(degrees, timeout_sec)
+    """Turn right a specified number of degrees using inertial sensor."""
+    turn_relative(degrees, timeout_sec)
 
 def turn_left(degrees, timeout_sec=3.0):
-    """Turn left a specified number of degrees."""
-    turn_pd(-degrees, timeout_sec)
+    """Turn left a specified number of degrees using inertial sensor."""
+    turn_relative(-degrees, timeout_sec)
+
+def turn_to(heading, timeout_sec=3.0):
+    """Turn to an absolute heading (0-360 degrees)."""
+    turn_to_heading(heading, timeout_sec)
 
 def intake_both(speed=INTAKE_SPEED, duration_sec=None):
     """
@@ -284,7 +341,7 @@ def intake_both(speed=INTAKE_SPEED, duration_sec=None):
         intake_blue.stop()
         intake_small.stop()
 
-def intake_small(speed=INTAKE_SPEED, duration_sec=None):
+def intake_small_motor(speed=INTAKE_SPEED, duration_sec=None):
     """
     Run the small intake motor.
     
@@ -297,7 +354,7 @@ def intake_small(speed=INTAKE_SPEED, duration_sec=None):
         wait(duration_sec, SECONDS)
         intake_small.stop()
 
-def intake_blue(speed=INTAKE_SPEED, duration_sec=None):
+def intake_blue_motor(speed=INTAKE_SPEED, duration_sec=None):
     """
     Run the blue intake motor.
     
@@ -367,98 +424,78 @@ def autonomous():
     brain.screen.print("Autonomous Started")
     brain.screen.new_line()
     
-    piston_G("on")
-    wait(0.3, SECONDS)
+    # Calibrate inertial at start
+    calibrate_inertial()
     
-    intake_both(100, 1.0)
-    
-    moving(500)
-    wait(0.2, SECONDS)
-    
-    piston_G("off")
-    wait(0.2, SECONDS)
-    
-    turn_right(200)
-    wait(0.2, SECONDS)
-    
-    moving(300)
-    wait(0.2, SECONDS)
-    
-    intake_both(-100, 0.5)
-    stop_intakes()
-    
-    moving(-300)
+    brain.screen.print("Test 1: 90 deg turns")
+    brain.screen.new_line()
+    turn_right(180)
+    wait(1, SECONDS)
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
     
-    
-# === PD TUNING TEST FUNCTION ===
-def test_pd_tuning():
-    """Use this function to test and tune your PD values."""
+# === INERTIAL TUNING TEST FUNCTION ===
+def test_inertial_tuning():
+    """Use this function to test and tune your inertial PD values."""
     brain.screen.clear_screen()
-    brain.screen.print("PD Tuning Tests")
+    brain.screen.print("Inertial Tuning Tests")
     brain.screen.new_line()
-    brain.screen.print("KP_D:" + str(KP_DRIVE) + " KD_D:" + str(KD_DRIVE))
-    brain.screen.new_line()
-    brain.screen.print("KP_T:" + str(KP_TURN) + " KD_T:" + str(KD_TURN))
+    
+    # Calibrate first
+    calibrate_inertial()
+    
+    brain.screen.print("KP_I:" + str(KP_INERTIAL) + " KD_I:" + str(KD_INERTIAL))
     brain.screen.new_line()
     
     wait(1, SECONDS)
     
-    # Test 1: Quick acceleration test
-    brain.screen.print("Test 1: Quick Start/Stop")
+    # Test 1: 90 degree turns
+    brain.screen.print("Test 1: 90 deg turns")
     brain.screen.new_line()
-    moving(500)
-    wait(0.5, SECONDS)
+    turn_right(90)
+    wait(1, SECONDS)
+    turn_right(90)
+    wait(1, SECONDS)
+    turn_right(90)
+    wait(1, SECONDS)
+    turn_right(90)
+    wait(1, SECONDS)
     
-    # Test 2: Precision positioning
-    brain.screen.print("Test 2: Precision Moves")
+    # Test 2: Turn to absolute headings
+    brain.screen.print("Test 2: Absolute headings")
     brain.screen.new_line()
-    moving(200)
-    wait(0.3, SECONDS)
-    moving(200)
-    wait(0.3, SECONDS)
-    moving(200)
+    turn_to(0)
     wait(0.5, SECONDS)
-    
-    # Test 3: Sharp turn
-    brain.screen.print("Test 3: Sharp Right Turn")
-    brain.screen.new_line()
-    turn_right(300)
+    turn_to(45)
     wait(0.5, SECONDS)
-    
-    # Test 4: Drive and turn sequence
-    brain.screen.print("Test 4: Drive + Turn")
-    brain.screen.new_line()
-    moving(800)
-    wait(0.3, SECONDS)
-    turn_left(300)
-    wait(0.3, SECONDS)
-    moving(400)
+    turn_to(180)
     wait(0.5, SECONDS)
-    
-    # Test 5: Reverse
-    brain.screen.print("Test 5: Reverse")
-    brain.screen.new_line()
-    moving(-600)
+    turn_to(270)
     wait(0.5, SECONDS)
+    turn_to(0)
+    wait(1, SECONDS)
     
-    # Test 6: Quick direction changes
-    brain.screen.print("Test 6: Quick Changes")
+    # Test 3: Drive straight with gyro
+    brain.screen.print("Test 3: Straight drive")
     brain.screen.new_line()
-    moving(300)
-    wait(0.2, SECONDS)
-    turn_right(150)
-    wait(0.2, SECONDS)
-    moving(-300)
-    wait(0.2, SECONDS)
-    turn_left(150)
+    moving(1000)
+    wait(0.5, SECONDS)
+    moving(-1000)
+    wait(1, SECONDS)
+    
+    # Test 4: Square pattern
+    brain.screen.print("Test 4: Square")
+    brain.screen.new_line()
+    for i in range(4):
+        moving(600)
+        wait(0.3, SECONDS)
+        turn_right(90)
+        wait(0.3, SECONDS)
     
     brain.screen.new_line()
     brain.screen.print("Tuning Tests Complete!")
-    
-# To use the tuning tests, temporarily change autonomous() to call test_pd_tuning()
+    brain.screen.print("Final heading: " + str(inertial.heading(DEGREES)))
 
 # === DRIVER CONTROL ===
 def user_control():
@@ -471,6 +508,8 @@ def user_control():
     brain.screen.print("Driver Control")
     brain.screen.new_line()
     brain.screen.print("Brake: " + str(ACTIVE_DRIVE_BRAKE))
+    brain.screen.new_line()
+    brain.screen.print("Heading: " + str(inertial.heading(DEGREES)))
     
     while True:
         # === DRIVE CONTROL ===
@@ -540,8 +579,8 @@ comp = Competition(user_control, autonomous)
 brain.screen.clear_screen()
 brain.screen.print("Program Started")
 brain.screen.new_line()
-brain.screen.print("PD Control Ready")
+brain.screen.print("Inertial Sensor Ready")
 brain.screen.new_line()
-brain.screen.print("KP_D:" + str(KP_DRIVE) + " KD_D:" + str(KD_DRIVE))
+brain.screen.print("Place on flat surface")
 brain.screen.new_line()
-brain.screen.print("KP_T:" + str(KP_TURN) + " KD_T:" + str(KD_TURN))
+brain.screen.print("for calibration")
