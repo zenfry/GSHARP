@@ -28,7 +28,7 @@ MAX_POWER = 80   # Maximum power for safety
 
 # PD Control Constants for Inertial Turns
 KP_INERTIAL = 0.7   # Proportional gain for inertial turning
-KD_INERTIAL = 0.2  # Derivative gain for inertial turning
+KD_INERTIAL = 0.25  # Derivative gain for inertial turning
 MIN_TURN_POWER = 10
 MAX_TURN_POWER = 45
 
