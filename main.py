@@ -6,6 +6,9 @@
 # 	Description:  V5 project with PD control, custom brake, and inertial      #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
+
+""" 400 degrees = 20 inches"""
+
 # Library imports
 from vex import *
 
@@ -13,6 +16,9 @@ from vex import *
 DEADBAND = 5
 INTAKE_SPEED = 100
 DRIVE_UPDATE_RATE = 20
+INCHES_TO_DEGREES_SLOPE = 0.0514113
+INCHES_TO_DEGREES_OFFSET = 0.806452
+
 
 # Brake Settings
 DRIVE_BRAKE_STRENGTH_STRONG = 0.7
@@ -134,6 +140,25 @@ def control_intake(blue_speed, small_speed):
     else:
         intake_small.spin(FORWARD if small_speed > 0 else REVERSE, abs(small_speed), PERCENT)
 
+    def inches_to_degrees(inches):
+        degrees = (inches + INCHES_TO_DEGREES_OFFSET) / INCHES_TO_DEGREES_SLOPE
+    return degrees
+
+
+def inches_to_degrees(inches):
+    """
+    Convert inches to motor encoder degrees using calibration equation.
+    Equation: inches = 0.0514113 * degrees - 0.806452
+    Solved for degrees: degrees = (inches + 0.806452) / 0.0514113
+    
+    Args:
+        inches: Distance in inches
+    
+    Returns:
+        Motor encoder degrees
+    """
+    degrees = (inches + INCHES_TO_DEGREES_OFFSET) / INCHES_TO_DEGREES_SLOPE
+    return degrees
 # === PD CONTROL FUNCTIONS ===
 def reset_drive_encoders():
     """Reset all drive motor encoders to zero."""
@@ -148,18 +173,19 @@ def clamp(value, min_val, max_val):
     """Clamp a value between min and max."""
     return max(min_val, min(max_val, value))
 
-def drive_forward_pd(target_degrees, timeout_sec=5.0):
+def drive_forward_pd(target_degrees, max_speed=MAX_POWER, timeout_sec=5.0):
     """
     Drive forward using PD (Proportional-Derivative) control with gyro correction.
     
     Args:
         target_degrees: Distance to travel in encoder degrees
+        max_speed: Maximum speed to use (0-100)
         timeout_sec: Maximum time to wait (safety)
     """
     reset_drive_encoders()
     initial_heading = inertial.heading(DEGREES)
     
-    brain.screen.print("PD Drive: " + str(target_degrees) + " deg")
+    brain.screen.print("PD Drive: " + str(target_degrees) + " deg @ " + str(max_speed) + "%")
     brain.screen.new_line()
     
     start_time = brain.timer.time(SECONDS)
@@ -193,8 +219,8 @@ def drive_forward_pd(target_degrees, timeout_sec=5.0):
             else:
                 power = min(power, -MIN_POWER)
         
-        # Clamp to safe limits
-        power = clamp(power, -MAX_POWER, MAX_POWER)
+        # Clamp to user-specified max speed (instead of MAX_POWER constant)
+        power = clamp(power, -max_speed, max_speed)
         
         # Gyro correction to drive straight
         current_heading = inertial.heading(DEGREES)
@@ -307,12 +333,18 @@ def turn_relative(degrees, timeout_sec=3.0):
 
 # === HIGH-LEVEL AUTONOMOUS FUNCTIONS ===
 
-def moving(degrees, timeout_sec=5.0):
+def moving(inches, speed=MAX_POWER, timeout_sec=5.0):
     """
-    Move forward or backward a specified number of degrees.
-    Positive = forward, Negative = backward
+    Move forward or backward a specified distance in inches.
+    Positive inches = forward, Negative inches = backward
+    
+    Args:
+        inches: Distance to travel in inches
+        speed: Maximum speed percentage (0-100)
+        timeout_sec: Maximum time allowed for the movement
     """
-    drive_forward_pd(degrees, timeout_sec)
+    degrees = inches_to_degrees(inches)
+    drive_forward_pd(degrees, speed, timeout_sec)
 
 def turn_right(degrees, timeout_sec=3.0):
     """Turn right a specified number of degrees using inertial sensor."""
@@ -367,9 +399,11 @@ def intake_blue_motor(speed=INTAKE_SPEED, duration_sec=None):
         wait(duration_sec, SECONDS)
         intake_blue.stop()
 
-def stop_intakes():
+def stop_intakeB():
     """Stop all intake motors."""
     intake_blue.stop()
+
+def stop_intakeS():
     intake_small.stop()
 
 def piston_G(state):
@@ -419,18 +453,13 @@ def piston_F(state):
 
 # === AUTONOMOUS ===
 def autonomous():
-    """Autonomous mode - build your routine here!"""
-    brain.screen.clear_screen()
-    brain.screen.print("Autonomous Started")
-    brain.screen.new_line()
-    
-    # Calibrate inertial at start
     calibrate_inertial()
-    
-    brain.screen.print("Test 1: 90 deg turns")
-    brain.screen.new_line()
-    turn_right(180)
-    wait(1, SECONDS)
+    moving(18, 100)
+    turn_left(15)
+    intake_blue_motor(-100)
+    moving(30, 40)
+    stop_intakeB()
+    turn_left(45)
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
