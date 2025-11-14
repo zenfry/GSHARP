@@ -98,7 +98,7 @@ def calibrate_inertial():
     
     brain.screen.new_line()
     brain.screen.print("Calibration Complete!")
-    wait(0.5, SECONDS)
+    wait(0.1, SECONDS)
 
 # === HELPER FUNCTIONS ===
 def apply_deadband(value, deadband=DEADBAND):
@@ -458,39 +458,33 @@ def autonomous():
     moving(30, 55) #move to balls
     stop_intakeB() 
     
-    turn_left(48) #turn to balls under long goal
-    intake_blue_motor(-100) 
-    moving(22.5, 55) #move to balls under long goal
+    turn_left(126)
+    moving(36, 90)
+    turn_left(36)
+    piston_H(1)
+
+    moving(12, 50, 0.6) #do normal drive not PD
+    intake_blue_motor(-95)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2, 72)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2.1, 72)
     wait(0.3, SECONDS)
     stop_intakeB()
-    moving(-27, 55) #move to low goal
-    turn_left(262) #turned around
-    intake_blue_motor(-50, 0.7)
-    moving(14, 45, 1) #move to is
-    moving(-5, 55) #back up a little
-    intake_both(100, 0.9) #put the ball in
-    
-    moving(-47.455, 70)
-    piston_H(1)
-    turn_left(221)
-    moving(18, 70, 0.5) #do normal drive not PD
-    intake_blue_motor(-100)
-    wait(0.3, SECONDS)
-    stop_intakeB
-    moving(-2, 70)
-    moving(2, 70)
-    intake_blue_motor(-100)
-    wait(0.3, SECONDS)
-    stop_intakeB
-    moving(-3, 70)
-    moving(3, 70)
-    intake_blue_motor(-100)
-    wait(0.3, SECONDS)
-    stop_intakeB
-    turn_left(3)
-    moving(-30, 60)
+    turn_left(11)
+    moving(-32, 60, 2)
+    moving(0.5, 30)
+    intake_both(-100, 3.5)
 
-    intake_both(-100, 3)
+    piston_F(1)
+
+    moving(15, 90)
+    turn_left(90)
+    moving(11.5, 70)
+    turn_right(87)
+    moving(-37, 80)
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
