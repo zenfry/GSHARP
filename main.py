@@ -140,11 +140,6 @@ def control_intake(blue_speed, small_speed):
     else:
         intake_small.spin(FORWARD if small_speed > 0 else REVERSE, abs(small_speed), PERCENT)
 
-    def inches_to_degrees(inches):
-        degrees = (inches + INCHES_TO_DEGREES_OFFSET) / INCHES_TO_DEGREES_SLOPE
-    return degrees
-
-
 def inches_to_degrees(inches):
     """
     Convert inches to motor encoder degrees using calibration equation.
@@ -159,6 +154,7 @@ def inches_to_degrees(inches):
     """
     degrees = (inches + INCHES_TO_DEGREES_OFFSET) / INCHES_TO_DEGREES_SLOPE
     return degrees
+
 # === PD CONTROL FUNCTIONS ===
 def reset_drive_encoders():
     """Reset all drive motor encoders to zero."""
@@ -454,12 +450,47 @@ def piston_F(state):
 # === AUTONOMOUS ===
 def autonomous():
     calibrate_inertial()
-    moving(18, 100)
-    turn_left(15)
-    intake_blue_motor(-100)
-    moving(30, 40)
+    
+    intake_both(-100, 0.4) #to adjust ball
+    moving(18, 90) #first move
+    turn_left(15) #turn to first set
+    intake_blue_motor(-100) #started intaked
+    moving(30, 55) #move to balls
+    stop_intakeB() 
+    
+    turn_left(48) #turn to balls under long goal
+    intake_blue_motor(-100) 
+    moving(22.5, 55) #move to balls under long goal
+    wait(0.3, SECONDS)
     stop_intakeB()
-    turn_left(45)
+    moving(-27, 55) #move to low goal
+    turn_left(262) #turned around
+    intake_blue_motor(-50, 0.7)
+    moving(14, 45, 1) #move to is
+    moving(-5, 55) #back up a little
+    intake_both(100, 0.9) #put the ball in
+    
+    moving(-47.455, 70)
+    piston_H(1)
+    turn_left(221)
+    moving(18, 70, 0.5) #do normal drive not PD
+    intake_blue_motor(-100)
+    wait(0.3, SECONDS)
+    stop_intakeB
+    moving(-2, 70)
+    moving(2, 70)
+    intake_blue_motor(-100)
+    wait(0.3, SECONDS)
+    stop_intakeB
+    moving(-3, 70)
+    moving(3, 70)
+    intake_blue_motor(-100)
+    wait(0.3, SECONDS)
+    stop_intakeB
+    turn_left(3)
+    moving(-30, 60)
+
+    intake_both(-100, 3)
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
