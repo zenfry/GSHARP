@@ -3,7 +3,7 @@
 # 	Module:       main.py                                                      #
 # 	Author:       jordanawilkes                                                #
 # 	Created:      11/5/2025, 9:50:54 PM                                        #
-# 	Description:  V5 project with PD control, custom brake, and inertial      #
+# 	Description:  V5 project with multi-config autonomous (4 positions)       #
 #                                                                              #
 # ---------------------------------------------------------------------------- #
 
@@ -12,13 +12,16 @@
 # Library imports
 from vex import *
 
+# === CONFIGURATION SELECTION ===
+TEAM_COLOR = "BLUE"    # Options: "BLUE" or "RED"
+STARTING_SIDE = "LEFT" # Options: "LEFT" or "RIGHT"
+
 # === CONSTANTS ===
 DEADBAND = 5
 INTAKE_SPEED = 100
 DRIVE_UPDATE_RATE = 20
 INCHES_TO_DEGREES_SLOPE = 0.0514113
 INCHES_TO_DEGREES_OFFSET = 0.806452
-
 
 # Brake Settings
 DRIVE_BRAKE_STRENGTH_STRONG = 0.7
@@ -27,14 +30,14 @@ TURN_BRAKE_MULTIPLIER = 1.3
 ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG
 
 # PD Control Constants for Drive
-KP_DRIVE = 0.25  # Proportional gain for driving straight
-KD_DRIVE = 0.25  # Derivative gain for driving straight
-MIN_POWER = 12   # Minimum power to overcome friction
-MAX_POWER = 80   # Maximum power for safety
+KP_DRIVE = 0.25
+KD_DRIVE = 0.25
+MIN_POWER = 12
+MAX_POWER = 80
 
 # PD Control Constants for Inertial Turns
-KP_INERTIAL = 0.7   # Proportional gain for inertial turning
-KD_INERTIAL = 0.25  # Derivative gain for inertial turning
+KP_INERTIAL = 0.7
+KD_INERTIAL = 0.25
 MIN_TURN_POWER = 10
 MAX_TURN_POWER = 45
 
@@ -42,10 +45,10 @@ MAX_TURN_POWER = 45
 brain = Brain()
 controller = Controller(PRIMARY)
 
-# Inertial Sensor (change port as needed)
+# Inertial Sensor
 inertial = Inertial(Ports.PORT10)
 
-# Pneumatic Pistons (DigitalOut for single solenoids)
+# Pneumatic Pistons
 mg_piston = DigitalOut(brain.three_wire_port.g)
 ds_piston = DigitalOut(brain.three_wire_port.f)
 ml_piston = DigitalOut(brain.three_wire_port.h)
@@ -83,10 +86,21 @@ intake_small = Motor(Ports.PORT7, GearSetting.RATIO_18_1, True)
 previous_left_speed = 0
 previous_right_speed = 0
 
+# === CONFIGURATION HELPER ===
+def get_turn_multiplier():
+    """
+    Calculate turn direction multiplier based on side.
+    LEFT side: normal (1)
+    RIGHT side: mirror (-1)
+    """
+    return 1 if STARTING_SIDE == "LEFT" else -1
+
 # === INERTIAL SENSOR INITIALIZATION ===
 def calibrate_inertial():
     """Calibrate the inertial sensor. Must be done while robot is stationary!"""
     brain.screen.clear_screen()
+    brain.screen.print("Config: " + TEAM_COLOR + " - " + STARTING_SIDE)
+    brain.screen.new_line()
     brain.screen.print("Calibrating Inertial...")
     brain.screen.new_line()
     brain.screen.print("DO NOT MOVE ROBOT!")
@@ -141,17 +155,7 @@ def control_intake(blue_speed, small_speed):
         intake_small.spin(FORWARD if small_speed > 0 else REVERSE, abs(small_speed), PERCENT)
 
 def inches_to_degrees(inches):
-    """
-    Convert inches to motor encoder degrees using calibration equation.
-    Equation: inches = 0.0514113 * degrees - 0.806452
-    Solved for degrees: degrees = (inches + 0.806452) / 0.0514113
-    
-    Args:
-        inches: Distance in inches
-    
-    Returns:
-        Motor encoder degrees
-    """
+    """Convert inches to motor encoder degrees using calibration equation."""
     degrees = (inches + INCHES_TO_DEGREES_OFFSET) / INCHES_TO_DEGREES_SLOPE
     return degrees
 
@@ -170,159 +174,95 @@ def clamp(value, min_val, max_val):
     return max(min_val, min(max_val, value))
 
 def drive_forward_pd(target_degrees, max_speed=MAX_POWER, timeout_sec=5.0):
-    """
-    Drive forward using PD (Proportional-Derivative) control with gyro correction.
-    
-    Args:
-        target_degrees: Distance to travel in encoder degrees
-        max_speed: Maximum speed to use (0-100)
-        timeout_sec: Maximum time to wait (safety)
-    """
+    """Drive forward using PD control with gyro correction."""
     reset_drive_encoders()
     initial_heading = inertial.heading(DEGREES)
-    
-    brain.screen.print("PD Drive: " + str(target_degrees) + " deg @ " + str(max_speed) + "%")
-    brain.screen.new_line()
     
     start_time = brain.timer.time(SECONDS)
     previous_error = 0
     
     while True:
-        # Calculate error
         current_position = get_average_encoder_value()
         error = target_degrees - current_position
         
-        # Check if we're done
-        if abs(error) < 10:  # Within 10 degrees = close enough
+        if abs(error) < 10:
             break
         
-        # Timeout check
         if (brain.timer.time(SECONDS) - start_time) > timeout_sec:
-            brain.screen.print("Timeout!")
-            brain.screen.new_line()
             break
         
-        # Calculate derivative (rate of change of error)
         derivative = error - previous_error
-        
-        # Calculate PD power
         power = (error * KP_DRIVE) + (derivative * KD_DRIVE)
         
-        # Add minimum power to overcome friction (only when far from target)
         if abs(error) > 50:
             if power > 0:
                 power = max(power, MIN_POWER)
             else:
                 power = min(power, -MIN_POWER)
         
-        # Clamp to user-specified max speed (instead of MAX_POWER constant)
         power = clamp(power, -max_speed, max_speed)
         
-        # Gyro correction to drive straight
         current_heading = inertial.heading(DEGREES)
         heading_error = initial_heading - current_heading
         
-        # Normalize heading error to -180 to 180
         if heading_error > 180:
             heading_error -= 360
         elif heading_error < -180:
             heading_error += 360
         
-        # Apply correction (small proportional adjustment)
         correction = heading_error * 0.5
         
-        # Apply power with correction
         left_drive.spin(FORWARD, power + correction, PERCENT)
         right_drive.spin(FORWARD, power - correction, PERCENT)
         
-        # Store error for next iteration
         previous_error = error
-        
         wait(20, MSEC)
     
-    # Stop with brake
     left_drive.stop(BRAKE)
     right_drive.stop(BRAKE)
-    
-    brain.screen.print("Final: " + str(get_average_encoder_value()))
-    brain.screen.new_line()
 
 def turn_to_heading(target_heading, timeout_sec=3.0):
-    """
-    Turn to an absolute heading using inertial sensor with PD control.
-    
-    Args:
-        target_heading: Target heading in degrees (0-360)
-        timeout_sec: Maximum time to wait
-    """
-    brain.screen.print("Turn to: " + str(target_heading) + " deg")
-    brain.screen.new_line()
-    
+    """Turn to an absolute heading using inertial sensor with PD control."""
     start_time = brain.timer.time(SECONDS)
     previous_error = 0
     
     while True:
         current_heading = inertial.heading(DEGREES)
-        
-        # Calculate error (shortest path)
         error = target_heading - current_heading
         
-        # Normalize error to -180 to 180 (shortest turn direction)
         if error > 180:
             error -= 360
         elif error < -180:
             error += 360
         
-        # Check if done
-        if abs(error) < 2:  # Within 2 degrees
+        if abs(error) < 2:
             break
         
-        # Timeout check
         if (brain.timer.time(SECONDS) - start_time) > timeout_sec:
-            brain.screen.print("Turn timeout!")
-            brain.screen.new_line()
             break
         
-        # Calculate derivative
         derivative = error - previous_error
-        
-        # Calculate PD power
         power = (error * KP_INERTIAL) + (derivative * KD_INERTIAL)
         
-        # Add minimum power
         if abs(error) > 10:
             if power > 0:
                 power = max(power, MIN_TURN_POWER)
             else:
                 power = min(power, -MIN_TURN_POWER)
         
-        # Clamp power
         power = clamp(power, -MAX_TURN_POWER, MAX_TURN_POWER)
         
-        # Apply power (positive error = turn right)
         left_drive.spin(FORWARD, power, PERCENT)
         right_drive.spin(REVERSE, power, PERCENT)
         
-        # Store error for next iteration
         previous_error = error
-        
         wait(20, MSEC)
     
-    # Stop with brake
     left_drive.stop(BRAKE)
     right_drive.stop(BRAKE)
-    
-    brain.screen.print("Heading: " + str(inertial.heading(DEGREES)))
-    brain.screen.new_line()
 
 def turn_relative(degrees, timeout_sec=3.0):
-    """
-    Turn relative to current heading using inertial sensor.
-    
-    Args:
-        degrees: Degrees to turn (positive = right, negative = left)
-        timeout_sec: Maximum time to wait
-    """
+    """Turn relative to current heading using inertial sensor."""
     current_heading = inertial.heading(DEGREES)
     target_heading = (current_heading + degrees) % 360
     turn_to_heading(target_heading, timeout_sec)
@@ -330,38 +270,24 @@ def turn_relative(degrees, timeout_sec=3.0):
 # === HIGH-LEVEL AUTONOMOUS FUNCTIONS ===
 
 def moving(inches, speed=MAX_POWER, timeout_sec=5.0):
-    """
-    Move forward or backward a specified distance in inches.
-    Positive inches = forward, Negative inches = backward
-    
-    Args:
-        inches: Distance to travel in inches
-        speed: Maximum speed percentage (0-100)
-        timeout_sec: Maximum time allowed for the movement
-    """
+    """Move forward or backward a specified distance in inches."""
     degrees = inches_to_degrees(inches)
     drive_forward_pd(degrees, speed, timeout_sec)
 
 def turn_right(degrees, timeout_sec=3.0):
-    """Turn right a specified number of degrees using inertial sensor."""
-    turn_relative(degrees, timeout_sec)
+    """Turn right - automatically mirrors for RIGHT side."""
+    turn_relative(degrees * get_turn_multiplier(), timeout_sec)
 
 def turn_left(degrees, timeout_sec=3.0):
-    """Turn left a specified number of degrees using inertial sensor."""
-    turn_relative(-degrees, timeout_sec)
+    """Turn left - automatically mirrors for RIGHT side."""
+    turn_relative(-degrees * get_turn_multiplier(), timeout_sec)
 
 def turn_to(heading, timeout_sec=3.0):
     """Turn to an absolute heading (0-360 degrees)."""
     turn_to_heading(heading, timeout_sec)
 
 def intake_both(speed=INTAKE_SPEED, duration_sec=None):
-    """
-    Run both intake motors at the same speed.
-    
-    Args:
-        speed: Motor speed (-100 to 100, negative = reverse)
-        duration_sec: If specified, run for this duration then stop
-    """
+    """Run both intake motors at the same speed."""
     intake_blue.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
     intake_small.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
     if duration_sec is not None:
@@ -370,45 +296,29 @@ def intake_both(speed=INTAKE_SPEED, duration_sec=None):
         intake_small.stop()
 
 def intake_small_motor(speed=INTAKE_SPEED, duration_sec=None):
-    """
-    Run the small intake motor.
-    
-    Args:
-        speed: Motor speed (-100 to 100, negative = reverse)
-        duration_sec: If specified, run for this duration then stop
-    """
+    """Run the small intake motor."""
     intake_small.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
     if duration_sec is not None:
         wait(duration_sec, SECONDS)
         intake_small.stop()
 
 def intake_blue_motor(speed=INTAKE_SPEED, duration_sec=None):
-    """
-    Run the blue intake motor.
-    
-    Args:
-        speed: Motor speed (-100 to 100, negative = reverse)
-        duration_sec: If specified, run for this duration then stop
-    """
+    """Run the blue intake motor."""
     intake_blue.spin(FORWARD if speed > 0 else REVERSE, abs(speed), PERCENT)
     if duration_sec is not None:
         wait(duration_sec, SECONDS)
         intake_blue.stop()
 
 def stop_intakeB():
-    """Stop all intake motors."""
+    """Stop blue intake motor."""
     intake_blue.stop()
 
 def stop_intakeS():
+    """Stop small intake motor."""
     intake_small.stop()
 
 def piston_G(state):
-    """
-    Control the G piston (mg_piston on port G).
-    
-    Args:
-        state: "on" or "off" (can also use True/False or 1/0)
-    """
+    """Control the G piston (mg_piston on port G)."""
     global mg_piston_state
     if state in ["on", True, 1]:
         mg_piston_state = True
@@ -418,12 +328,7 @@ def piston_G(state):
         mg_piston.set(False)
 
 def piston_H(state):
-    """
-    Control the H piston (ml_piston on port H).
-    
-    Args:
-        state: "on" or "off" (can also use True/False or 1/0)
-    """
+    """Control the H piston (ml_piston on port H)."""
     global ml_piston_state
     if state in ["on", True, 1]:
         ml_piston_state = True
@@ -433,12 +338,7 @@ def piston_H(state):
         ml_piston.set(False)
 
 def piston_F(state):
-    """
-    Control the F piston (ds_piston on port F).
-    
-    Args:
-        state: "on" or "off" (can also use True/False or 1/0)
-    """
+    """Control the F piston (ds_piston on port F)."""
     global ds_piston_state
     if state in ["on", True, 1]:
         ds_piston_state = True
@@ -447,23 +347,23 @@ def piston_F(state):
         ds_piston_state = False
         ds_piston.set(False)
 
-# === AUTONOMOUS ===
-def autonomous():
-    calibrate_inertial()
-    
-    intake_both(-100, 0.4) #to adjust ball
-    moving(18, 90) #first move
-    turn_left(15) #turn to first set
-    intake_blue_motor(-100) #started intaked
-    moving(30, 55) #move to balls
-    stop_intakeB() 
+# === AUTONOMOUS ROUTINES ===
+
+def autonomous_blue_left():
+    """Original autonomous routine - BLUE team, LEFT side"""
+    intake_both(-100, 0.4)
+    moving(18, 90)
+    turn_left(15)
+    intake_blue_motor(-100)
+    moving(30, 55)
+    stop_intakeB()
     
     turn_left(126)
     moving(36, 90)
     turn_left(36)
     piston_H(1)
 
-    moving(12, 50, 0.6) #do normal drive not PD
+    moving(12, 50, 0.6)
     intake_blue_motor(-95)
     wait(0.3, SECONDS)
     moving(-2, 70)
@@ -485,75 +385,149 @@ def autonomous():
     moving(11.5, 70)
     turn_right(87)
     moving(-37, 80)
+
+def autonomous_blue_right():
+    """Mirrored routine - BLUE team, RIGHT side"""
+    intake_both(-100, 0.4)
+    moving(18, 90)
+    turn_right(15)  # Mirrored
+    intake_blue_motor(-100)
+    moving(30, 55)
+    stop_intakeB()
+    
+    turn_right(126)  # Mirrored
+    moving(36, 90)
+    turn_right(36)   # Mirrored
+    piston_H(1)
+
+    moving(12, 50, 0.6)
+    intake_blue_motor(-95)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2, 72)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2.1, 72)
+    wait(0.3, SECONDS)
+    stop_intakeB()
+    turn_right(11)   # Mirrored
+    moving(-32, 60, 2)
+    moving(0.5, 30)
+    intake_both(-100, 3.5)
+
+    piston_F(1)
+
+    moving(15, 90)
+    turn_right(90)   # Mirrored
+    moving(11.5, 70)
+    turn_left(87)    # Mirrored
+    moving(-37, 80)
+
+def autonomous_red_left():
+    """RED team, LEFT side - same movements as blue_left but for red alliance"""
+    intake_both(-100, 0.4)
+    moving(18, 90)
+    turn_left(15)
+    intake_blue_motor(-100)
+    moving(30, 55)
+    stop_intakeB()
+    
+    turn_left(126)
+    moving(36, 90)
+    turn_left(36)
+    piston_H(1)
+
+    moving(12, 50, 0.6)
+    intake_blue_motor(-95)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2, 72)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2.1, 72)
+    wait(0.3, SECONDS)
+    stop_intakeB()
+    turn_left(11)
+    moving(-32, 60, 2)
+    moving(0.5, 30)
+    intake_both(-100, 3.5)
+
+    piston_F(1)
+
+    moving(15, 90)
+    turn_left(90)
+    moving(11.5, 70)
+    turn_right(87)
+    moving(-37, 80)
+
+def autonomous_red_right():
+    """RED team, RIGHT side - mirrored movements"""
+    intake_both(-100, 0.4)
+    moving(18, 90)
+    turn_right(15)
+    intake_blue_motor(-100)
+    moving(30, 55)
+    stop_intakeB()
+    
+    turn_right(126)
+    moving(36, 90)
+    turn_right(36)
+    piston_H(1)
+
+    moving(12, 50, 0.6)
+    intake_blue_motor(-95)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2, 72)
+    wait(0.3, SECONDS)
+    moving(-2, 70)
+    moving(2.1, 72)
+    wait(0.3, SECONDS)
+    stop_intakeB()
+    turn_right(11)
+    moving(-32, 60, 2)
+    moving(0.5, 30)
+    intake_both(-100, 3.5)
+
+    piston_F(1)
+
+    moving(15, 90)
+    turn_right(90)
+    moving(11.5, 70)
+    turn_left(87)
+    moving(-37, 80)
+
+# === MAIN AUTONOMOUS SELECTOR ===
+def autonomous():
+    """Main autonomous function - selects correct routine based on configuration."""
+    calibrate_inertial()
+    
+    brain.screen.clear_screen()
+    brain.screen.print("Running: " + TEAM_COLOR + " " + STARTING_SIDE)
+    brain.screen.new_line()
+    
+    # Select appropriate autonomous routine
+    if TEAM_COLOR == "BLUE" and STARTING_SIDE == "LEFT":
+        autonomous_blue_left()
+    elif TEAM_COLOR == "BLUE" and STARTING_SIDE == "RIGHT":
+        autonomous_blue_right()
+    elif TEAM_COLOR == "RED" and STARTING_SIDE == "LEFT":
+        autonomous_red_left()
+    elif TEAM_COLOR == "RED" and STARTING_SIDE == "RIGHT":
+        autonomous_red_right()
+    else:
+        brain.screen.print("INVALID CONFIG!")
+        brain.screen.new_line()
+        brain.screen.print("Check TEAM_COLOR")
+        brain.screen.new_line()
+        brain.screen.print("and STARTING_SIDE")
+        return
     
     brain.screen.new_line()
     brain.screen.print("Auton Complete!")
-    
-# === INERTIAL TUNING TEST FUNCTION ===
-def test_inertial_tuning():
-    """Use this function to test and tune your inertial PD values."""
-    brain.screen.clear_screen()
-    brain.screen.print("Inertial Tuning Tests")
-    brain.screen.new_line()
-    
-    # Calibrate first
-    calibrate_inertial()
-    
-    brain.screen.print("KP_I:" + str(KP_INERTIAL) + " KD_I:" + str(KD_INERTIAL))
-    brain.screen.new_line()
-    
-    wait(1, SECONDS)
-    
-    # Test 1: 90 degree turns
-    brain.screen.print("Test 1: 90 deg turns")
-    brain.screen.new_line()
-    turn_right(90)
-    wait(1, SECONDS)
-    turn_right(90)
-    wait(1, SECONDS)
-    turn_right(90)
-    wait(1, SECONDS)
-    turn_right(90)
-    wait(1, SECONDS)
-    
-    # Test 2: Turn to absolute headings
-    brain.screen.print("Test 2: Absolute headings")
-    brain.screen.new_line()
-    turn_to(0)
-    wait(0.5, SECONDS)
-    turn_to(45)
-    wait(0.5, SECONDS)
-    turn_to(180)
-    wait(0.5, SECONDS)
-    turn_to(270)
-    wait(0.5, SECONDS)
-    turn_to(0)
-    wait(1, SECONDS)
-    
-    # Test 3: Drive straight with gyro
-    brain.screen.print("Test 3: Straight drive")
-    brain.screen.new_line()
-    moving(1000)
-    wait(0.5, SECONDS)
-    moving(-1000)
-    wait(1, SECONDS)
-    
-    # Test 4: Square pattern
-    brain.screen.print("Test 4: Square")
-    brain.screen.new_line()
-    for i in range(4):
-        moving(600)
-        wait(0.3, SECONDS)
-        turn_right(90)
-        wait(0.3, SECONDS)
-    
-    brain.screen.new_line()
-    brain.screen.print("Tuning Tests Complete!")
-    brain.screen.print("Final heading: " + str(inertial.heading(DEGREES)))
 
 # === DRIVER CONTROL ===
 def user_control():
-    """Driver control mode - runs after autonomous."""
     global previous_left_speed, previous_right_speed
     global mg_piston_state, ds_piston_state, ml_piston_state
     global button_a_was_pressed, button_x_was_pressed, button_b_was_pressed
@@ -561,9 +535,7 @@ def user_control():
     brain.screen.clear_screen()
     brain.screen.print("Driver Control")
     brain.screen.new_line()
-    brain.screen.print("Brake: " + str(ACTIVE_DRIVE_BRAKE))
-    brain.screen.new_line()
-    brain.screen.print("Heading: " + str(inertial.heading(DEGREES)))
+    brain.screen.print(TEAM_COLOR + " - " + STARTING_SIDE)
     
     while True:
         # === DRIVE CONTROL ===
@@ -631,10 +603,6 @@ def user_control():
 comp = Competition(user_control, autonomous)
 
 brain.screen.clear_screen()
-brain.screen.print("Program Started")
+brain.screen.print("Config: " + TEAM_COLOR + " - " + STARTING_SIDE)
 brain.screen.new_line()
-brain.screen.print("Inertial Sensor Ready")
-brain.screen.new_line()
-brain.screen.print("Place on flat surface")
-brain.screen.new_line()
-brain.screen.print("for calibration")
+brain.screen.print("You got this!! -J")
