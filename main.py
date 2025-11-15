@@ -28,6 +28,7 @@ DRIVE_BRAKE_STRENGTH_STRONG = 0.7
 DRIVE_BRAKE_STRENGTH_WEAK = 0.4
 TURN_BRAKE_MULTIPLIER = 1.3
 ACTIVE_DRIVE_BRAKE = DRIVE_BRAKE_STRENGTH_STRONG
+Tolerance = 15
 
 # PD Control Constants for Drive
 KP_DRIVE = 0.25
@@ -350,100 +351,87 @@ def piston_F(state):
 # === AUTONOMOUS ROUTINES ===
 
 def autonomous_blue_left():
-    """Original autonomous routine - BLUE team, LEFT side"""
+    calibrate_inertial()
     intake_both(-100, 0.4)
-    moving(16.5, 80)
+    moving(17, 80)
     turn_right(90)
     intake_blue_motor(-100)
-    moving(30, 45)
-    wait(1, SECONDS)
+    moving(30, 50)
     stop_intakeB()
-    moving(-30, 75)
+    moving(-30,75)
     turn_left(90)
-    moving(25, 75)
+    moving(25,75)
     turn_left(90)
-    moving(-22)
-    intake_both(-100, 4)
-    piston_F(1)
-    moving(15, 90)
-    turn_left(90)
-    moving(11.5, 70)
-    turn_right(87)
-    moving(-37, 80)
-    wait(5, SECONDS)
-    intake_blue_motor(-100)
+    moving(-20.5, 90)
+    intake_both(-100, 2.5)
 
+    piston_F(1)
+
+    moving(18, 90)
+    turn_right(30)
+    moving(-38, 70)
 def autonomous_blue_right():
-    """Mirrored routine - BLUE team, RIGHT side"""
+    calibrate_inertial()
     intake_both(-100, 0.4)
-    moving(16.5, 80)
+    moving(17, 80)
     turn_left(90)
     intake_blue_motor(-100)
-    moving(30, 45)
-    wait(1, SECONDS)
+    moving(30, 50)
     stop_intakeB()
-    moving(-30, 75)
+    moving(-30,75)
     turn_right(90)
-    moving(25, 75)
+    moving(25,75)
     turn_right(90)
-    moving(-22)
-    intake_both(-100, 4)
+    moving(-20.5, 90)
+    intake_both(-100, 2.5)
+
     piston_F(1)
-    moving(15, 90)
-    turn_right(90)
-    moving(11.5, 70)
-    turn_left(87)
-    moving(-37, 80)
-    wait(5, SECONDS)
-    intake_blue_motor(-100)
+
+    moving(18, 90)
+    turn_left(30)
+    moving(-38, 70)
 
 def autonomous_red_left():
-    """RED team, LEFT side - same movements as blue_left but for red alliance"""
+    calibrate_inertial()
     intake_both(-100, 0.4)
-    moving(16.5, 80)
+    moving(17, 80)
     turn_right(90)
     intake_blue_motor(-100)
-    moving(30, 45)
-    wait(1, SECONDS)
+    moving(30, 50)
     stop_intakeB()
-    moving(-30, 75)
+    moving(-30,75)
     turn_left(90)
-    moving(25, 75)
+    moving(25,75)
     turn_left(90)
-    moving(-22)
-    intake_both(-100, 4)
+    moving(-20.5, 90)
+    intake_both(-100, 2.5)
+
     piston_F(1)
-    moving(15, 90)
-    turn_left(90)
-    moving(11.5, 70)
-    turn_right(87)
-    moving(-37, 80)
-    wait(5, SECONDS)
-    intake_blue_motor(-100)
+
+    moving(18, 90)
+    turn_right(30)
+    moving(-38, 70)
 
 def autonomous_red_right():
-    """RED team, RIGHT side - mirrored movements"""
+    calibrate_inertial()
     intake_both(-100, 0.4)
-    moving(16.5, 80)
+    moving(17, 80)
     turn_left(90)
     intake_blue_motor(-100)
-    moving(30, 45)
-    wait(1, SECONDS)
+    moving(30, 50)
     stop_intakeB()
-    moving(-30, 75)
+    moving(-30,75)
     turn_right(90)
-    moving(25, 75)
+    moving(25,75)
     turn_right(90)
-    moving(-22)
-    intake_both(-100, 4)
+    moving(-20.5, 90)
+    intake_both(-100, 2.5)
+
     piston_F(1)
-    moving(15, 90)
-    turn_right(90)
-    moving(11.5, 70)
-    turn_left(87)
-    moving(-37, 80)
-    wait(5, SECONDS)
-    intake_blue_motor(-100)
+
+    moving(18, 90)
+    turn_left(30)
+    moving(-38, 70)
 
 # === MAIN AUTONOMOUS SELECTOR ===
 def autonomous():
@@ -554,4 +542,5 @@ brain.screen.clear_screen()
 brain.screen.print("Config: " + TEAM_COLOR + " - " + STARTING_SIDE)
 brain.screen.new_line()
 brain.screen.print("You got this!! -J")
+
 
