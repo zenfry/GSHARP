@@ -455,111 +455,14 @@ def piston_F(state):
 
 #  AUTONOMOUS ROUTINES
 
-def autonomous_logo():
-    move_curve_relative(35.15, -138, 32)
-    intake_blue_motor(-100)
-    move_cm(32, 35, timeout_sec=1.55)
-    stop_intakeB()
-    move_cm(-4.5, 45)
-    intake_blue_motor(100,1.2)
-    move_cm(-20, 55)
-    move_curve_relative(-26, -138, 45)
-    piston_H(True)
-    move_cm(39,40,1.3)
-    intake_blue_motor(100, .3)
-    intake_blue_motor(-100)
-    move_cm(10, 0, 2.3)
-    move_curve_relative(-30, -25, 55,1.6)
-    move_cm(-2, 40, 1)
-    intake_both(-100,10)
 
-def autonomous_mogo(): 
+def jjdabest():
     intake_blue_motor(-100)
-    move_curve_relative(42, -40, 40)
-    move_curve_relative(-19, -115, 30)
-    move_cm(-4, 40)
-    intake_blue_motor(0)
-    piston_G(True)
-    intake_both(-100)
-    wait(2, SECONDS)
-    piston_G(False)
-    intake_both(0)
-    piston_H(True)
-    move_curve_relative(62, -6.3, 44, 4)
-    intake_blue_motor(100, .2)
-    intake_blue_motor(-100)
-    wait(1.8, SECONDS)
-    intake_blue_motor(0)
-    move_curve_relative(-27, -59, 50, 1.6)
-    move_cm(-8, 40, 1)
-    intake_both(-100,10)
-    wait(2, SECONDS)
-    intake_both(0)
-
-def prog():
-    move_curve_relative(42, 40, 40)
-    intake_blue_motor(0)
-    move_curve_relative(-19, 115, 30)
-    move_cm(-4, 40)
-    piston_G(True)
-    intake_both(-100)
-    wait(2, SECONDS)
-    piston_G(False)
-    intake_both(0)
-    piston_H(True)
-    move_curve_relative(62, 6.7, 40, 4)
-    intake_blue_motor(100, .25)
-    intake_blue_motor(-100)
-    wait(2.4, SECONDS)
-    intake_blue_motor(0)
-    move_curve_relative(-26, 57, 50, 1.6)
-    move_cm(-10, 40, 1)
-    intake_both(-100,10)
-    wait(2.4, SECONDS)
-    intake_both(0)
-    move_cm(-23, 40, 1)
-    turn_right(90)
-    intake_blue_motor(-100)
-    move_cm(48, 40, 3)
-    turn_left(45)
-    move_cm(23, 20)
-    intake_blue_motor(100)
-    wait(1, SECONDS)
-    intake_blue_motor(0)
-    turn_right(90)
-    move_cm(35, 30)
-    turn_left(90)
-    move_cm(20, 60)
-
-def testing():
-    intake_blue_motor(-100)
-    move_curve(120, 13, 50)
-    wait(0.3, SECONDS)
-    intake_blue_motor(0)
-    turn_left(69)
-    move_cm(18, 30)
-    intake_blue_motor(90)
-    wait(1.3, SECONDS)
-    intake_blue_motor(0)
-    turn_left(-2)
-    move_cm( -116.5+24, 60)
-    piston_H(False)
-    piston_H(True)
-    turn_right(235)
-    move_cm(60, 60)
-
-def testing2():
-    intake_blue_motor(-100)
-    move_curve(113, -20, 50)
-    wait(0.3, SECONDS)
-    intake_blue_motor(0)
-    turn_left(90+15)
-    move_cm(-39, 40)
-    intake_blue_motor(100)
+    move_curve(110, -30, 50)
     
 #  MAIN AUTONOMOUS
 def autonomous():
-    testing2()
+    jjdabest()
 
 #  DRIVER CONTROL
 def user_control():
@@ -570,7 +473,6 @@ def user_control():
     brain.screen.clear_screen()
     brain.screen.print("Driver Control")
     brain.screen.new_line()
-    controller.screen.print("you've got this! -J")
     while True:
         #  DRIVE CONTROL
         raw_forward = apply_deadband(controller.axis3.position())
@@ -635,4 +537,3 @@ def user_control():
 
 #  MAIN PROGRAM
 comp = Competition(user_control, autonomous)
-
